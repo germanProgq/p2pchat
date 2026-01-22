@@ -63,6 +63,15 @@ target_link_libraries(storage
     crypto
 )
 
+add_library(transport
+  core/transport/src/LoopbackTransport.cpp
+)
+
+target_include_directories(transport
+  PUBLIC
+    core/transport/include
+)
+
 if(APPLE)
   target_link_libraries(identity PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
@@ -142,6 +151,15 @@ target_link_libraries(storage_tests
     OpenSSL::Crypto
 )
 
+add_executable(transport_tests
+  tests/transport_tests.cpp
+)
+
+target_link_libraries(transport_tests
+  PRIVATE
+    transport
+)
+
 target_compile_definitions(storage_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -165,6 +183,7 @@ endif()
 add_test(NAME identity_tests COMMAND identity_tests)
 add_test(NAME crypto_tests COMMAND crypto_tests)
 add_test(NAME storage_tests COMMAND storage_tests)
+add_test(NAME transport_tests COMMAND transport_tests)
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh

@@ -41,6 +41,7 @@ Automated test
 - Migration tests; outbox retry timing tests; sync gap repair test.
 
 Phase 4: Transport Abstraction (C++ core)
+Status: done
 SSOT
 - core/transport/ITransport.h (interface contract + invariants)
 Manual test
