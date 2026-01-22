@@ -1,0 +1,75 @@
+Plan: Single Source of Truth per Implementation + Testable Phases
+
+Principle
+- Each implementation area has exactly one authoritative source of truth (SSOT).
+- Every phase is independently testable with manual steps and automated tests.
+
+Phase 0: Spec Alignment
+Status: done
+SSOT
+- app.txt (overall architecture + constraints)
+Manual test
+- Review app.txt for requirements coverage and launch constraint.
+Automated test
+- Lint/check script verifies app.txt exists and contains launch constraint line.
+
+Phase 1: Identity + Key Lifecycle (C++ core)
+Status: done
+SSOT
+- core/identity/README.md (key formats, storage, and rotation rules)
+Manual test
+- CLI tool generates identity, exports public key, reloads identity, verifies same public key.
+Automated test
+- Unit tests for key generation, serialization, and rotation; deterministic vectors.
+
+Phase 2: Crypto + Ratchet (C++ core)
+SSOT
+- core/crypto/ratchet_spec.md (message keys, header format, KDF chain)
+Manual test
+- Two local peers exchange a fixed handshake transcript and decrypt sample messages.
+Automated test
+- Test vectors for X3DH/ratchet; property tests for forward secrecy steps.
+
+Phase 3: Storage + Sync (C++ core)
+SSOT
+- core/storage/schema.sql (authoritative SQLite schema)
+Manual test
+- Insert message, simulate offline outbox, resume and verify ACK + retry logic.
+Automated test
+- Migration tests; outbox retry timing tests; sync gap repair test.
+
+Phase 4: Transport Abstraction (C++ core)
+SSOT
+- core/transport/ITransport.h (interface contract + invariants)
+Manual test
+- Loopback transport connects two peers; send/receive frames with ordering and ACK.
+Automated test
+- Mock transport tests for retries, backpressure, and reconnection behavior.
+
+Phase 5: RN Bridge + UI Contract
+SSOT
+- app/bridge/BridgeSpec.md (JSI/TurboModule method signatures + events)
+Manual test
+- RN app calls start/addContact/send/getHistory and receives onMessage events.
+Automated test
+- Integration tests with a fake core; snapshot tests for event payload shapes.
+
+Phase 6: End-to-End P2P (Two Devices)
+SSOT
+- docs/e2e_flow.md (step-by-step connection, sync, and message flow)
+Manual test
+- Two devices link, exchange messages, disconnect/reconnect, and resync history.
+Automated test
+- Headless e2e test with two core instances and a simulated transport.
+
+Phase 7: Security & Hardening
+SSOT
+- core/security/SECURITY.md (threat model, hardening checklist)
+Manual test
+- Verify key zeroization paths and revoke device flow.
+Automated test
+- Static analysis checks for banned crypto calls; fuzz tests for frame parsing.
+
+Notes
+- Each SSOT file should be referenced by code comments and tests.
+- No duplicate specs; updates must happen in the SSOT document for that area.
