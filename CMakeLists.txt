@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(OpenSSL REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 add_library(identity
   core/identity/src/IdentityStore.cpp
@@ -37,6 +38,29 @@ target_include_directories(crypto
 target_link_libraries(crypto
   PRIVATE
     OpenSSL::Crypto
+)
+
+add_library(storage
+  core/storage/src/BloomFilter.cpp
+  core/storage/src/Storage.cpp
+)
+
+target_include_directories(storage
+  PUBLIC
+    core/storage/include
+    core/identity/include
+    core/crypto/include
+  PRIVATE
+    ${SQLite3_INCLUDE_DIRS}
+)
+
+target_link_libraries(storage
+  PRIVATE
+    ${SQLite3_LIBRARIES}
+    OpenSSL::Crypto
+  PUBLIC
+    identity
+    crypto
 )
 
 if(APPLE)
@@ -105,6 +129,24 @@ target_link_libraries(crypto_tests
     OpenSSL::Crypto
 )
 
+add_executable(storage_tests
+  tests/storage_tests.cpp
+)
+
+target_link_libraries(storage_tests
+  PRIVATE
+    storage
+    identity
+    crypto
+    ${SQLite3_LIBRARIES}
+    OpenSSL::Crypto
+)
+
+target_compile_definitions(storage_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 if(APPLE)
   target_link_libraries(identity_tests PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
@@ -122,6 +164,7 @@ endif()
 
 add_test(NAME identity_tests COMMAND identity_tests)
 add_test(NAME crypto_tests COMMAND crypto_tests)
+add_test(NAME storage_tests COMMAND storage_tests)
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh

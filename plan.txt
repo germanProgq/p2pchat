@@ -32,6 +32,7 @@ Automated test
 - Test vectors for X3DH/ratchet; property tests for forward secrecy steps.
 
 Phase 3: Storage + Sync (C++ core)
+Status: done
 SSOT
 - core/storage/schema.sql (authoritative SQLite schema)
 Manual test
