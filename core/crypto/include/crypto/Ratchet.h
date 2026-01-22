@@ -28,6 +28,19 @@ struct RatchetConfig {
   uint32_t max_skip = 2000;
 };
 
+struct RatchetState {
+  std::array<uint8_t, 32> root_key{};
+  KeyPair local_ratchet_key{};
+  std::array<uint8_t, 32> remote_ratchet_pub{};
+  std::array<uint8_t, 32> sending_chain_key{};
+  std::array<uint8_t, 32> receiving_chain_key{};
+  bool has_sending_chain = false;
+  bool has_receiving_chain = false;
+  uint32_t sending_count = 0;
+  uint32_t receiving_count = 0;
+  uint32_t previous_sending_count = 0;
+};
+
 class Ratchet {
  public:
   ~Ratchet();
@@ -50,6 +63,8 @@ class Ratchet {
 
   static std::vector<uint8_t> serializeHeader(const RatchetHeader& header);
   static RatchetHeader parseHeader(const std::vector<uint8_t>& data);
+  static Ratchet fromState(const RatchetState& state, const RatchetConfig& config = {});
+  RatchetState exportState() const;
 
   const std::array<uint8_t, 32>& rootKey() const;
   const std::array<uint8_t, 32>& sendingChainKey() const;

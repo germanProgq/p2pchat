@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "crypto/Primitives.h"
 #include "identity/IdentityStore.h"
 
 namespace storage {
@@ -59,9 +60,15 @@ struct SessionState {
   std::array<uint8_t, 32> root_key{};
   std::array<uint8_t, 32> chain_snd{};
   std::array<uint8_t, 32> chain_rcv{};
+  crypto::KeyPair local_ratchet_key{};
+  std::array<uint8_t, 32> remote_ratchet_pub{};
+  bool has_sending_chain = false;
+  bool has_receiving_chain = false;
   uint32_t counter_snd = 0;
   uint32_t counter_rcv = 0;
   uint32_t previous_counter = 0;
+  uint64_t frame_counter_snd = 0;
+  uint64_t frame_counter_rcv = 0;
 };
 
 struct PrekeyRecord {
@@ -69,6 +76,12 @@ struct PrekeyRecord {
   std::vector<uint8_t> public_key;
   std::vector<uint8_t> secret;
   bool used = false;
+};
+
+struct ChatSummary {
+  std::string chat_id;
+  int64_t last_index = 0;
+  int64_t updated_at_ms = 0;
 };
 
 class Storage {
@@ -95,6 +108,8 @@ class Storage {
                                                int64_t end_index) const;
 
   int64_t lastIndex(const std::string& chat_id) const;
+  std::vector<ChatSummary> listChats() const;
+  bool messageExists(const std::string& chat_id, const std::string& msg_id) const;
   void markMessageDelivered(const std::string& chat_id, const std::string& msg_id);
   void markMessageAcked(const std::string& chat_id, const std::string& msg_id);
 
@@ -128,6 +143,13 @@ class Storage {
   void storePrekey(const PrekeyRecord& record);
   std::optional<PrekeyRecord> loadPrekey(int64_t id) const;
   void markPrekeyUsed(int64_t id);
+  std::optional<PrekeyRecord> loadUnusedPrekey(int64_t min_id) const;
+  int64_t countUnusedPrekeys(int64_t min_id) const;
+
+  void setMeta(const std::string& key, const std::vector<uint8_t>& value);
+  std::optional<std::vector<uint8_t>> getMeta(const std::string& key) const;
+
+  void upsertMessageAtIndex(const StoredMessage& message, int64_t index);
 
  private:
   StorageOptions options_;

@@ -248,6 +248,39 @@ RatchetHeader Ratchet::parseHeader(const std::vector<uint8_t>& data) {
   return header;
 }
 
+Ratchet Ratchet::fromState(const RatchetState& state, const RatchetConfig& config) {
+  Ratchet ratchet(config, state.root_key, state.local_ratchet_key, state.remote_ratchet_pub);
+  ratchet.root_key_ = state.root_key;
+  ratchet.local_ratchet_key_ = state.local_ratchet_key;
+  ratchet.remote_ratchet_pub_ = state.remote_ratchet_pub;
+  ratchet.sending_chain_key_ = state.sending_chain_key;
+  ratchet.receiving_chain_key_ = state.receiving_chain_key;
+  ratchet.has_sending_chain_ = state.has_sending_chain;
+  ratchet.has_receiving_chain_ = state.has_receiving_chain;
+  ratchet.ns_ = state.sending_count;
+  ratchet.nr_ = state.receiving_count;
+  ratchet.pn_ = state.previous_sending_count;
+  if (state.remote_ratchet_pub != std::array<uint8_t, 32>{}) {
+    ratchet.known_remote_keys_.insert(state.remote_ratchet_pub);
+  }
+  return ratchet;
+}
+
+RatchetState Ratchet::exportState() const {
+  RatchetState state;
+  state.root_key = root_key_;
+  state.local_ratchet_key = local_ratchet_key_;
+  state.remote_ratchet_pub = remote_ratchet_pub_;
+  state.sending_chain_key = sending_chain_key_;
+  state.receiving_chain_key = receiving_chain_key_;
+  state.has_sending_chain = has_sending_chain_;
+  state.has_receiving_chain = has_receiving_chain_;
+  state.sending_count = ns_;
+  state.receiving_count = nr_;
+  state.previous_sending_count = pn_;
+  return state;
+}
+
 const std::array<uint8_t, 32>& Ratchet::rootKey() const {
   return root_key_;
 }

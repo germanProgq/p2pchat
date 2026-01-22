@@ -17,6 +17,8 @@ namespace storage {
 namespace {
 
 constexpr int kSchemaVersion = 1;
+constexpr uint32_t kSessionStateMagic = 0x324E5353;
+constexpr uint32_t kSessionStateVersion = 2;
 
 struct SealedBlob {
   crypto::AeadAlgorithm algorithm = crypto::AeadAlgorithm::ChaCha20Poly1305;
@@ -91,6 +93,12 @@ void writeU32(std::vector<uint8_t>& out, uint32_t value) {
   out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
 }
 
+void writeU64(std::vector<uint8_t>& out, uint64_t value) {
+  for (int i = 0; i < 8; ++i) {
+    out.push_back(static_cast<uint8_t>((value >> (8 * i)) & 0xFF));
+  }
+}
+
 uint32_t readU32(const std::vector<uint8_t>& data, size_t& offset) {
   if (offset + 4 > data.size()) {
     throw std::runtime_error("session state parse overflow");
@@ -103,22 +111,56 @@ uint32_t readU32(const std::vector<uint8_t>& data, size_t& offset) {
   return value;
 }
 
+uint64_t readU64(const std::vector<uint8_t>& data, size_t& offset) {
+  if (offset + 8 > data.size()) {
+    throw std::runtime_error("session state parse overflow");
+  }
+  uint64_t value = 0;
+  for (int i = 0; i < 8; ++i) {
+    value |= static_cast<uint64_t>(data[offset + i]) << (8 * i);
+  }
+  offset += 8;
+  return value;
+}
+
 std::vector<uint8_t> encodeSession(const SessionState& state) {
   std::vector<uint8_t> out;
+  writeU32(out, kSessionStateMagic);
+  writeU32(out, kSessionStateVersion);
   writeU32(out, static_cast<uint32_t>(state.session_id.size()));
   out.insert(out.end(), state.session_id.begin(), state.session_id.end());
   out.insert(out.end(), state.root_key.begin(), state.root_key.end());
   out.insert(out.end(), state.chain_snd.begin(), state.chain_snd.end());
   out.insert(out.end(), state.chain_rcv.begin(), state.chain_rcv.end());
+  out.insert(out.end(), state.local_ratchet_key.private_key.begin(), state.local_ratchet_key.private_key.end());
+  out.insert(out.end(), state.local_ratchet_key.public_key.begin(), state.local_ratchet_key.public_key.end());
+  out.insert(out.end(), state.remote_ratchet_pub.begin(), state.remote_ratchet_pub.end());
+  out.push_back(static_cast<uint8_t>(state.has_sending_chain ? 1 : 0));
+  out.push_back(static_cast<uint8_t>(state.has_receiving_chain ? 1 : 0));
   writeU32(out, state.counter_snd);
   writeU32(out, state.counter_rcv);
   writeU32(out, state.previous_counter);
+  writeU64(out, state.frame_counter_snd);
+  writeU64(out, state.frame_counter_rcv);
   return out;
 }
 
 SessionState decodeSession(const std::vector<uint8_t>& data) {
   SessionState state;
   size_t offset = 0;
+  bool has_header = data.size() >= 8;
+  if (has_header) {
+    uint32_t magic = readU32(data, offset);
+    if (magic == kSessionStateMagic) {
+      uint32_t version = readU32(data, offset);
+      if (version != kSessionStateVersion) {
+        throw std::runtime_error("session state version mismatch");
+      }
+    } else {
+      offset = 0;
+    }
+  }
+
   uint32_t session_len = readU32(data, offset);
   if (offset + session_len > data.size()) {
     throw std::runtime_error("session state length invalid");
@@ -142,9 +184,31 @@ SessionState decodeSession(const std::vector<uint8_t>& data) {
             data.begin() + static_cast<std::ptrdiff_t>(offset + state.chain_rcv.size()),
             state.chain_rcv.begin());
   offset += state.chain_rcv.size();
+  if (offset + state.local_ratchet_key.private_key.size() +
+          state.local_ratchet_key.public_key.size() +
+          state.remote_ratchet_pub.size() + 2 <= data.size()) {
+    std::copy(data.begin() + static_cast<std::ptrdiff_t>(offset),
+              data.begin() + static_cast<std::ptrdiff_t>(offset + state.local_ratchet_key.private_key.size()),
+              state.local_ratchet_key.private_key.begin());
+    offset += state.local_ratchet_key.private_key.size();
+    std::copy(data.begin() + static_cast<std::ptrdiff_t>(offset),
+              data.begin() + static_cast<std::ptrdiff_t>(offset + state.local_ratchet_key.public_key.size()),
+              state.local_ratchet_key.public_key.begin());
+    offset += state.local_ratchet_key.public_key.size();
+    std::copy(data.begin() + static_cast<std::ptrdiff_t>(offset),
+              data.begin() + static_cast<std::ptrdiff_t>(offset + state.remote_ratchet_pub.size()),
+              state.remote_ratchet_pub.begin());
+    offset += state.remote_ratchet_pub.size();
+    state.has_sending_chain = data[offset++] != 0;
+    state.has_receiving_chain = data[offset++] != 0;
+  }
   state.counter_snd = readU32(data, offset);
   state.counter_rcv = readU32(data, offset);
   state.previous_counter = readU32(data, offset);
+  if (offset + 16 <= data.size()) {
+    state.frame_counter_snd = readU64(data, offset);
+    state.frame_counter_rcv = readU64(data, offset);
+  }
   return state;
 }
 
@@ -518,6 +582,39 @@ int64_t Storage::lastIndex(const std::string& chat_id) const {
   return 0;
 }
 
+std::vector<ChatSummary> Storage::listChats() const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  std::vector<ChatSummary> chats;
+  Statement stmt(db_->db, "SELECT chat_id, last_index, updated_at_ms FROM chats ORDER BY updated_at_ms DESC;");
+  while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+    ChatSummary summary;
+    summary.chat_id = columnText(stmt.get(), 0);
+    summary.last_index = columnInt64(stmt.get(), 1);
+    summary.updated_at_ms = columnInt64(stmt.get(), 2);
+    chats.push_back(std::move(summary));
+  }
+  return chats;
+}
+
+bool Storage::messageExists(const std::string& chat_id, const std::string& msg_id) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db, "SELECT 1 FROM messages WHERE chat_id = ? AND msg_id = ? LIMIT 1;");
+  bindText(stmt.get(), 1, chat_id);
+  bindText(stmt.get(), 2, msg_id);
+  int rc = sqlite3_step(stmt.get());
+  if (rc == SQLITE_ROW) {
+    return true;
+  }
+  if (rc != SQLITE_DONE) {
+    throw std::runtime_error("sqlite select message failed");
+  }
+  return false;
+}
+
 void Storage::markMessageDelivered(const std::string& chat_id, const std::string& msg_id) {
   if (!db_) {
     throw std::runtime_error("storage not open");
@@ -844,6 +941,128 @@ void Storage::markPrekeyUsed(int64_t id) {
   bindInt64(stmt.get(), 1, id);
   if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
     throw std::runtime_error("sqlite update prekey failed");
+  }
+}
+
+std::optional<PrekeyRecord> Storage::loadUnusedPrekey(int64_t min_id) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db,
+                 "SELECT id, public, secret_algo, secret_nonce, secret_blob, secret_tag, used"
+                 " FROM prekeys WHERE used = 0 AND id >= ? ORDER BY id ASC LIMIT 1;");
+  bindInt64(stmt.get(), 1, min_id);
+  if (sqlite3_step(stmt.get()) != SQLITE_ROW) {
+    return std::nullopt;
+  }
+  PrekeyRecord record;
+  record.id = columnInt64(stmt.get(), 0);
+  record.public_key = columnBlob(stmt.get(), 1);
+  SealedBlob sealed;
+  sealed.algorithm = static_cast<crypto::AeadAlgorithm>(columnInt(stmt.get(), 2));
+  auto nonce = columnBlob(stmt.get(), 3);
+  auto blob = columnBlob(stmt.get(), 4);
+  auto tag = columnBlob(stmt.get(), 5);
+  if (nonce.size() != sealed.nonce.size() || tag.size() != sealed.tag.size()) {
+    throw std::runtime_error("prekey nonce/tag size mismatch");
+  }
+  std::copy(nonce.begin(), nonce.end(), sealed.nonce.begin());
+  std::copy(tag.begin(), tag.end(), sealed.tag.begin());
+  sealed.blob = std::move(blob);
+  record.secret = openBlob(master_key_, sealed, "prekey:" + std::to_string(record.id));
+  record.used = columnInt(stmt.get(), 6) != 0;
+  return record;
+}
+
+int64_t Storage::countUnusedPrekeys(int64_t min_id) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db, "SELECT COUNT(1) FROM prekeys WHERE used = 0 AND id >= ?;");
+  bindInt64(stmt.get(), 1, min_id);
+  int rc = sqlite3_step(stmt.get());
+  if (rc == SQLITE_ROW) {
+    return columnInt64(stmt.get(), 0);
+  }
+  if (rc != SQLITE_DONE) {
+    throw std::runtime_error("sqlite count prekeys failed");
+  }
+  return 0;
+}
+
+void Storage::setMeta(const std::string& key, const std::vector<uint8_t>& value) {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db, "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value;");
+  bindText(stmt.get(), 1, key);
+  bindBlob(stmt.get(), 2, value);
+  if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
+    throw std::runtime_error("sqlite meta upsert failed");
+  }
+}
+
+std::optional<std::vector<uint8_t>> Storage::getMeta(const std::string& key) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db, "SELECT value FROM meta WHERE key = ?;");
+  bindText(stmt.get(), 1, key);
+  int rc = sqlite3_step(stmt.get());
+  if (rc == SQLITE_ROW) {
+    return columnBlob(stmt.get(), 0);
+  }
+  if (rc != SQLITE_DONE) {
+    throw std::runtime_error("sqlite meta select failed");
+  }
+  return std::nullopt;
+}
+
+void Storage::upsertMessageAtIndex(const StoredMessage& message, int64_t index) {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  db_->exec("BEGIN IMMEDIATE;");
+  try {
+    if (messageExists(message.chat_id, message.msg_id)) {
+      db_->exec("COMMIT;");
+      return;
+    }
+    SealedBlob sealed = sealBlob(master_key_, message.payload, "messages:" + message.chat_id + ":" + message.msg_id);
+    {
+      Statement stmt(db_->db,
+                     "INSERT INTO messages(chat_id, msg_id, sender_device, ts_ms, aead_algo, aead_nonce, aead_blob, aead_tag, delivered, acked, idx)"
+                     " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
+      bindText(stmt.get(), 1, message.chat_id);
+      bindText(stmt.get(), 2, message.msg_id);
+      bindText(stmt.get(), 3, message.sender_device);
+      bindInt64(stmt.get(), 4, message.ts_ms);
+      bindInt(stmt.get(), 5, static_cast<int>(sealed.algorithm));
+      bindBlob(stmt.get(), 6, sealed.nonce);
+      bindBlob(stmt.get(), 7, sealed.blob);
+      bindBlob(stmt.get(), 8, sealed.tag);
+      bindInt(stmt.get(), 9, message.delivered ? 1 : 0);
+      bindInt(stmt.get(), 10, message.acked ? 1 : 0);
+      bindInt64(stmt.get(), 11, index);
+      if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
+        throw std::runtime_error("sqlite insert message failed");
+      }
+    }
+    {
+      Statement stmt(db_->db,
+                     "INSERT INTO chats(chat_id, last_index, updated_at_ms) VALUES(?, ?, ?)"
+                     " ON CONFLICT(chat_id) DO UPDATE SET last_index = MAX(last_index, excluded.last_index), updated_at_ms = excluded.updated_at_ms;");
+      bindText(stmt.get(), 1, message.chat_id);
+      bindInt64(stmt.get(), 2, index);
+      bindInt64(stmt.get(), 3, message.ts_ms);
+      if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
+        throw std::runtime_error("sqlite upsert chat failed");
+      }
+    }
+    db_->exec("COMMIT;");
+  } catch (...) {
+    db_->exec("ROLLBACK;");
+    throw;
   }
 }
 

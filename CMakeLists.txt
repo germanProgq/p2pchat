@@ -65,11 +65,58 @@ target_link_libraries(storage
 
 add_library(transport
   core/transport/src/LoopbackTransport.cpp
+  core/transport/src/DatagramTransport.cpp
+  core/transport/src/QuicTransport.cpp
+  core/transport/src/WebRtcTransport.cpp
+  core/transport/src/Ice.cpp
 )
 
 target_include_directories(transport
   PUBLIC
     core/transport/include
+)
+
+target_link_libraries(transport
+  PRIVATE
+    OpenSSL::Crypto
+)
+
+if(WIN32)
+  target_link_libraries(transport PRIVATE ws2_32)
+endif()
+
+add_library(session
+  core/session/src/SessionManager.cpp
+)
+
+target_include_directories(session
+  PUBLIC
+    core/session/include
+)
+
+target_link_libraries(session
+  PUBLIC
+    transport
+    storage
+    crypto
+)
+
+add_library(core
+  core/core/src/Core.cpp
+)
+
+target_include_directories(core
+  PUBLIC
+    core/core/include
+)
+
+target_link_libraries(core
+  PUBLIC
+    session
+    transport
+    storage
+    identity
+    crypto
 )
 
 if(APPLE)
@@ -160,6 +207,34 @@ target_link_libraries(transport_tests
     transport
 )
 
+add_executable(session_tests
+  tests/session_tests.cpp
+)
+
+target_link_libraries(session_tests
+  PRIVATE
+    session
+)
+
+add_executable(core_tests
+  tests/core_tests.cpp
+)
+
+target_link_libraries(core_tests
+  PRIVATE
+    core
+)
+
+target_compile_definitions(session_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_compile_definitions(core_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 target_compile_definitions(storage_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -184,6 +259,8 @@ add_test(NAME identity_tests COMMAND identity_tests)
 add_test(NAME crypto_tests COMMAND crypto_tests)
 add_test(NAME storage_tests COMMAND storage_tests)
 add_test(NAME transport_tests COMMAND transport_tests)
+add_test(NAME session_tests COMMAND session_tests)
+add_test(NAME core_tests COMMAND core_tests)
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh

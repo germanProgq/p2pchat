@@ -630,7 +630,7 @@ void testLoopbackOrderingAndAck() {
     }
   };
 
-  require(a.connect(PeerInfo{"B"}), "loopback connect failed");
+  require(a.connect(PeerInfo{"B", "", 0}), "loopback connect failed");
   require(a_connected && b_connected, "connection callbacks missing");
 
   auto r1 = a.send("B", Frame{{1}});
@@ -664,7 +664,7 @@ void testSimulatedRetry() {
   b.onReceive = [&](const PeerId&, Frame&&) { receive_count++; };
   a.onAck = [&](const PeerId&, FrameId) { acked = true; };
 
-  require(a.connect(PeerInfo{"B"}), "simulated connect failed");
+  require(a.connect(PeerInfo{"B", "", 0}), "simulated connect failed");
   network.dropNextAck("B", "A");
 
   auto result = a.send("B", Frame{{9}});
@@ -702,7 +702,7 @@ void testBackpressure() {
     }
   };
 
-  require(a.connect(PeerInfo{"B"}), "simulated connect failed");
+  require(a.connect(PeerInfo{"B", "", 0}), "simulated connect failed");
 
   auto r1 = a.send("B", Frame{{1, 2, 3}});
   require(r1.status == SendStatus::Accepted, "first send rejected");
@@ -734,7 +734,7 @@ void testReconnection() {
   };
   b.onReceive = [&](const PeerId&, Frame&&) { received++; };
 
-  require(a.connect(PeerInfo{"B"}), "connect failed");
+  require(a.connect(PeerInfo{"B", "", 0}), "connect failed");
   a.disconnect("B");
   require(saw_disconnect, "disconnect callback missing");
 
@@ -742,7 +742,7 @@ void testReconnection() {
   require(rejected.status == SendStatus::Disconnected, "send should be rejected when disconnected");
 
   saw_reconnect = false;
-  require(a.connect(PeerInfo{"B"}), "reconnect failed");
+  require(a.connect(PeerInfo{"B", "", 0}), "reconnect failed");
   require(saw_reconnect, "reconnect callback missing");
 
   auto accepted = a.send("B", Frame{{8}});

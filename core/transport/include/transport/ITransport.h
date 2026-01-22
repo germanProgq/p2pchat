@@ -17,6 +17,9 @@ using FrameId = uint64_t;
 
 struct PeerInfo {
   PeerId id;
+  std::string address;
+  uint16_t port = 0;
+  std::string ice_blob;
 };
 
 struct Frame {
