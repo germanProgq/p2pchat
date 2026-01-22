@@ -23,6 +23,7 @@ Automated test
 - Unit tests for key generation, serialization, and rotation; deterministic vectors.
 
 Phase 2: Crypto + Ratchet (C++ core)
+Status: done
 SSOT
 - core/crypto/ratchet_spec.md (message keys, header format, KDF chain)
 Manual test

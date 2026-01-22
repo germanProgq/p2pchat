@@ -22,6 +22,23 @@ target_link_libraries(identity
     OpenSSL::Crypto
 )
 
+add_library(crypto
+  core/crypto/src/Primitives.cpp
+  core/crypto/src/Ratchet.cpp
+  core/crypto/src/X3DH.cpp
+)
+
+target_include_directories(crypto
+  PUBLIC
+    core/crypto/include
+    core/identity/include
+)
+
+target_link_libraries(crypto
+  PRIVATE
+    OpenSSL::Crypto
+)
+
 if(APPLE)
   target_link_libraries(identity PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
@@ -78,6 +95,16 @@ target_link_libraries(identity_tests
     OpenSSL::Crypto
 )
 
+add_executable(crypto_tests
+  tests/crypto_tests.cpp
+)
+
+target_link_libraries(crypto_tests
+  PRIVATE
+    crypto
+    OpenSSL::Crypto
+)
+
 if(APPLE)
   target_link_libraries(identity_tests PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
@@ -94,6 +121,7 @@ if(UNIX AND NOT APPLE)
 endif()
 
 add_test(NAME identity_tests COMMAND identity_tests)
+add_test(NAME crypto_tests COMMAND crypto_tests)
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh
