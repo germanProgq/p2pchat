@@ -13,6 +13,16 @@ CREATE TABLE IF NOT EXISTS chats (
   updated_at_ms INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS contacts (
+  peer_id TEXT PRIMARY KEY,
+  identity_ed25519 BLOB NOT NULL,
+  device_ed25519 BLOB NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_updated ON contacts(updated_at_ms);
+
 CREATE TABLE IF NOT EXISTS messages (
   chat_id TEXT NOT NULL,
   msg_id TEXT NOT NULL,
@@ -65,4 +75,13 @@ CREATE TABLE IF NOT EXISTS outbox (
 
 CREATE INDEX IF NOT EXISTS idx_outbox_retry ON outbox(next_retry_at_ms);
 
-PRAGMA user_version = 1;
+CREATE TABLE IF NOT EXISTS revocations (
+  device_id TEXT PRIMARY KEY,
+  identity_ed25519 BLOB NOT NULL,
+  revoked_at_ms INTEGER NOT NULL,
+  signature BLOB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_revocations_revoked_at ON revocations(revoked_at_ms);
+
+PRAGMA user_version = 2;

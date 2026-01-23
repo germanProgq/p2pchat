@@ -92,6 +92,7 @@ add_library(session
 target_include_directories(session
   PUBLIC
     core/session/include
+    core/security/include
 )
 
 target_link_libraries(session
@@ -108,6 +109,7 @@ add_library(core
 target_include_directories(core
   PUBLIC
     core/core/include
+    core/security/include
 )
 
 target_link_libraries(core
@@ -258,6 +260,15 @@ target_link_libraries(bridge_tests
     bridge
 )
 
+add_executable(security_tests
+  tests/security_tests.cpp
+)
+
+target_link_libraries(security_tests
+  PRIVATE
+    session
+)
+
 target_compile_definitions(session_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -279,6 +290,11 @@ target_compile_definitions(storage_tests
 )
 
 target_compile_definitions(bridge_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_compile_definitions(security_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
@@ -306,6 +322,7 @@ add_test(NAME session_tests COMMAND session_tests)
 add_test(NAME core_tests COMMAND core_tests)
 add_test(NAME e2e_tests COMMAND e2e_tests)
 add_test(NAME bridge_tests COMMAND bridge_tests)
+add_test(NAME security_tests COMMAND security_tests)
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh

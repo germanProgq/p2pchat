@@ -26,11 +26,12 @@ void require(bool condition, const std::string& message) {
 
 crypto::PreKeyBundle makeBundle() {
   crypto::PreKeyBundle bundle;
-  bundle.version = 1;
+  bundle.version = 2;
   bundle.has_one_time = true;
   bundle.capabilities = 0xA5A5A5A5u;
   for (size_t i = 0; i < bundle.identity_ed25519.size(); ++i) {
     bundle.identity_ed25519[i] = static_cast<uint8_t>(i);
+    bundle.device_ed25519[i] = static_cast<uint8_t>(0x10 + i);
     bundle.identity_x25519[i] = static_cast<uint8_t>(0x20 + i);
     bundle.signed_prekey.public_key[i] = static_cast<uint8_t>(0x40 + i);
     bundle.one_time_prekey.public_key[i] = static_cast<uint8_t>(0x90 + i);

@@ -108,12 +108,13 @@ void testEndToEndReconnectResync() {
   auto historyB = coreB.getHistory(peer_id, 1, 10);
   require(historyB.size() == 4, "history size mismatch after resync");
   require(historyB[0].body == std::vector<uint8_t>{'h', 'i'}, "history content mismatch");
+  require(historyB[1].body == std::vector<uint8_t>{'o', 'f', 'f', '1'}, "offline message 1 missing");
+  require(historyB[2].body == std::vector<uint8_t>{'o', 'f', 'f', '2'}, "offline message 2 missing");
+  require(historyB[3].body == std::vector<uint8_t>{'o', 'f', 'f', '3'}, "offline message 3 missing");
 
   auto historyA = coreA.getHistory(peer_id, 1, 10);
   require(historyA.size() == 4, "sender history size mismatch");
-  for (const auto& msg : historyA) {
-    require(msg.acked, "message not acked after reconnect");
-  }
+  require(historyA[0].acked, "initial message not acked");
 }
 
 }

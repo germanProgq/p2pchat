@@ -70,6 +70,7 @@ class Core {
                                                   int64_t start_index,
                                                   size_t limit) const;
   void linkDevice(const std::string& link_code);
+  void revokeDevice(const std::string& device_id);
 
   std::function<void(const session::IncomingMessage&)> onMessage;
   std::function<void(const transport::PeerId&, transport::ConnectionState)> onConnectionChange;
@@ -109,6 +110,7 @@ class Core {
   void handleHandshakeInit(const transport::PeerId& peer, const std::vector<uint8_t>& payload);
   void handleHandshakeAck(const transport::PeerId& peer, const std::vector<uint8_t>& payload);
   void sendHandshakeInit(const transport::PeerId& peer);
+  void handleDeviceRevoked(const std::string& device_id);
 
   std::string encodeLinkBundle(const crypto::PreKeyBundle& bundle) const;
   crypto::PreKeyBundle decodeLinkBundle(const std::string& link_code) const;

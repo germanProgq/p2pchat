@@ -68,6 +68,7 @@ Automated test
 - Headless e2e test with two core instances and a simulated transport.
 
 Phase 7: Security & Hardening
+Status: done
 SSOT
 - core/security/SECURITY.md (threat model, hardening checklist)
 Manual test

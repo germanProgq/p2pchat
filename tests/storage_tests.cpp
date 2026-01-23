@@ -86,9 +86,11 @@ void testMigrationAppliesSchema() {
   require(sqlite3_open_v2(db_path.string().c_str(), &db, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK,
           "sqlite open failed");
   int version = userVersion(db);
-  require(version == 1, "schema version mismatch");
+  require(version == 2, "schema version mismatch");
+  require(tableExists(db, "contacts"), "contacts table missing");
   require(tableExists(db, "messages"), "messages table missing");
   require(tableExists(db, "outbox"), "outbox table missing");
+  require(tableExists(db, "revocations"), "revocations table missing");
   sqlite3_close(db);
 }
 
@@ -100,7 +102,7 @@ void testMigrationRejectsNewerVersion() {
   sqlite3* db = nullptr;
   require(sqlite3_open_v2(db_path.string().c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) == SQLITE_OK,
           "sqlite open failed");
-  require(sqlite3_exec(db, "PRAGMA user_version = 2;", nullptr, nullptr, nullptr) == SQLITE_OK,
+  require(sqlite3_exec(db, "PRAGMA user_version = 3;", nullptr, nullptr, nullptr) == SQLITE_OK,
           "sqlite set user_version failed");
   sqlite3_close(db);
 

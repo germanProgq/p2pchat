@@ -36,8 +36,9 @@ struct OneTimePreKeyPair {
 };
 
 struct PreKeyBundle {
-  uint32_t version = 1;
+  uint32_t version = 2;
   std::array<uint8_t, 32> identity_ed25519{};
+  std::array<uint8_t, 32> device_ed25519{};
   std::array<uint8_t, 32> identity_x25519{};
   SignedPreKeyPublic signed_prekey{};
   bool has_one_time = false;
@@ -46,18 +47,20 @@ struct PreKeyBundle {
 };
 
 struct PreKeyMessage {
-  uint8_t version = 1;
+  uint8_t version = 2;
   uint8_t flags = 0;
   uint32_t signed_prekey_id = 0;
   uint32_t one_time_prekey_id = 0;
   uint32_t capabilities = 0;
   std::array<uint8_t, 32> initiator_identity_ed25519{};
+  std::array<uint8_t, 32> initiator_device_ed25519{};
   std::array<uint8_t, 32> initiator_identity_x25519{};
   std::array<uint8_t, 32> initiator_ephemeral{};
 };
 
 struct InitiatorKeys {
   std::array<uint8_t, 32> identity_ed25519{};
+  std::array<uint8_t, 32> device_ed25519{};
   std::array<uint8_t, 32> identity_x25519_public{};
   std::array<uint8_t, 32> identity_x25519_private{};
 };
@@ -77,9 +80,10 @@ struct ResponderResult {
   uint32_t one_time_prekey_id = 0;
 };
 
-SignedPreKeyPair createSignedPreKey(const identity::DeviceKeyPair& device_keys, uint32_t id);
+SignedPreKeyPair createSignedPreKey(const identity::IdentityKeyPair& identity_keys, uint32_t id);
 OneTimePreKeyPair createOneTimePreKey(uint32_t id);
-PreKeyBundle createPreKeyBundle(const identity::DeviceKeyPair& device_keys,
+PreKeyBundle createPreKeyBundle(const identity::IdentityKeyPair& identity_keys,
+                                const identity::DeviceKeyPair& device_keys,
                                 const SignedPreKeyPair& signed_prekey,
                                 const std::optional<OneTimePreKeyPublic>& one_time_prekey,
                                 uint32_t capabilities);

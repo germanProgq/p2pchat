@@ -32,10 +32,11 @@ Adds a contact and starts the handshake.
 - Returns: peerId (string).
 
 Prekey bundle encoding (little-endian integers):
-- version (u8)
+- version (u8, current = 2)
 - hasOneTime (u8)
 - capabilities (u32)
 - identityEd25519 (32 bytes)
+- deviceEd25519 (32 bytes)
 - identityX25519 (32 bytes)
 - signedPrekeyId (u32)
 - signedPrekeyPublic (32 bytes)

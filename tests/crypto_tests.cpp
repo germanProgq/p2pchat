@@ -121,9 +121,14 @@ void testHkdfVector() {
 }
 
 std::pair<crypto::Ratchet, crypto::Ratchet> setupHandshake() {
+  identity::IdentityKeyPair responder_identity{};
+  responder_identity.seed = hexToArray<32>(
+      "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+  responder_identity.public_key = crypto::ed25519PublicFromSeed(responder_identity.seed);
+
   identity::DeviceKeyPair responder{};
   responder.ed25519_seed = hexToArray<32>(
-      "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20");
+      "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40");
   responder.ed25519_public = crypto::ed25519PublicFromSeed(responder.ed25519_seed);
   responder.x25519_private = hexToArray<32>(
       "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f");
@@ -134,7 +139,7 @@ std::pair<crypto::Ratchet, crypto::Ratchet> setupHandshake() {
   signed_prekey.key_pair.private_key = hexToArray<32>(
       "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f");
   signed_prekey.key_pair.public_key = crypto::x25519PublicFromPrivate(signed_prekey.key_pair.private_key);
-  signed_prekey.signature = crypto::signSignedPreKey(responder.ed25519_seed,
+  signed_prekey.signature = crypto::signSignedPreKey(responder_identity.seed,
                                                      signed_prekey.id,
                                                      signed_prekey.key_pair.public_key);
 
@@ -148,14 +153,30 @@ std::pair<crypto::Ratchet, crypto::Ratchet> setupHandshake() {
   one_time_pub.id = one_time.id;
   one_time_pub.public_key = one_time.key_pair.public_key;
 
-  crypto::PreKeyBundle bundle = crypto::createPreKeyBundle(responder, signed_prekey, one_time_pub, 0);
+  crypto::PreKeyBundle bundle = crypto::createPreKeyBundle(responder_identity,
+                                                           responder,
+                                                           signed_prekey,
+                                                           one_time_pub,
+                                                           0);
+
+  identity::IdentityKeyPair initiator_identity{};
+  initiator_identity.seed = hexToArray<32>(
+      "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f");
+  initiator_identity.public_key = crypto::ed25519PublicFromSeed(initiator_identity.seed);
+
+  identity::DeviceKeyPair initiator_device{};
+  initiator_device.ed25519_seed = hexToArray<32>(
+      "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf");
+  initiator_device.ed25519_public = crypto::ed25519PublicFromSeed(initiator_device.ed25519_seed);
+  initiator_device.x25519_private = hexToArray<32>(
+      "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
+  initiator_device.x25519_public = crypto::x25519PublicFromPrivate(initiator_device.x25519_private);
 
   crypto::InitiatorKeys initiator{};
-  initiator.identity_ed25519 = crypto::ed25519PublicFromSeed(hexToArray<32>(
-      "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"));
-  initiator.identity_x25519_private = hexToArray<32>(
-      "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf");
-  initiator.identity_x25519_public = crypto::x25519PublicFromPrivate(initiator.identity_x25519_private);
+  initiator.identity_ed25519 = initiator_identity.public_key;
+  initiator.device_ed25519 = initiator_device.ed25519_public;
+  initiator.identity_x25519_private = initiator_device.x25519_private;
+  initiator.identity_x25519_public = initiator_device.x25519_public;
 
   crypto::KeyPair ephemeral{};
   ephemeral.private_key = hexToArray<32>(

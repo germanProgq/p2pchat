@@ -17,7 +17,8 @@ namespace session {
 
 enum class ContentType : uint8_t {
   Text = 1,
-  Binary = 2
+  Binary = 2,
+  DeviceRevocation = 3
 };
 
 struct HistoryMessage {
@@ -77,6 +78,7 @@ class SessionManager {
 
   bool loadSession(const transport::PeerId& peer);
   bool hasSession(const transport::PeerId& peer) const;
+  void dropSession(const transport::PeerId& peer);
 
   void sendMessage(const transport::PeerId& peer,
                    const std::string& chat_id,
@@ -92,6 +94,7 @@ class SessionManager {
 
   std::function<void(const IncomingMessage&)> onMessage;
   std::function<void(const transport::PeerId&, const std::string&)> onError;
+  std::function<void(const std::string&)> onDeviceRevoked;
 
  private:
   struct Session {

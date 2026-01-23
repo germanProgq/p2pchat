@@ -84,6 +84,21 @@ struct ChatSummary {
   int64_t updated_at_ms = 0;
 };
 
+struct ContactRecord {
+  std::string peer_id;
+  std::array<uint8_t, 32> identity_ed25519{};
+  std::array<uint8_t, 32> device_ed25519{};
+  int64_t created_at_ms = 0;
+  int64_t updated_at_ms = 0;
+};
+
+struct RevocationRecord {
+  std::string device_id;
+  std::array<uint8_t, 32> identity_ed25519{};
+  int64_t revoked_at_ms = 0;
+  std::array<uint8_t, 64> signature{};
+};
+
 class Storage {
  public:
   explicit Storage(StorageOptions options);
@@ -109,9 +124,15 @@ class Storage {
 
   int64_t lastIndex(const std::string& chat_id) const;
   std::vector<ChatSummary> listChats() const;
+  void upsertContact(const ContactRecord& contact);
+  std::optional<ContactRecord> loadContact(const std::string& peer_id) const;
+  std::vector<ContactRecord> listContacts() const;
   bool messageExists(const std::string& chat_id, const std::string& msg_id) const;
   void markMessageDelivered(const std::string& chat_id, const std::string& msg_id);
   void markMessageAcked(const std::string& chat_id, const std::string& msg_id);
+  void storeRevocation(const RevocationRecord& record);
+  std::optional<RevocationRecord> loadRevocation(const std::string& device_id) const;
+  bool isDeviceRevoked(const std::string& device_id) const;
 
   int64_t enqueueOutbox(const std::string& peer_device,
                         const std::vector<uint8_t>& session_id,
@@ -140,6 +161,7 @@ class Storage {
   std::optional<SessionState> loadSession(const std::string& peer_device) const;
   std::vector<std::string> listSessionPeers() const;
   void deleteSession(const std::string& peer_device);
+  void clearOutboxForPeer(const std::string& peer_device);
 
   void storePrekey(const PrekeyRecord& record);
   std::optional<PrekeyRecord> loadPrekey(int64_t id) const;

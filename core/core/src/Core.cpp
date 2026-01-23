@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "crypto/Primitives.h"
+#include "security/Revocation.h"
 #include "transport/Ice.h"
 
 namespace core {
@@ -191,9 +192,14 @@ std::vector<uint8_t> hexToBytes(const std::string& hex) {
   return out;
 }
 
-std::string userIdFromDevice(const std::array<uint8_t, 32>& ed25519_public) {
+std::string userIdFromIdentity(const std::array<uint8_t, 32>& ed25519_public) {
   std::array<uint8_t, 32> user_id = identity::IdentityStore::userIdFromPublicKey(ed25519_public);
   return identity::IdentityStore::toHex(user_id);
+}
+
+std::string deviceIdFromDevice(const std::array<uint8_t, 32>& ed25519_public) {
+  std::array<uint8_t, 32> device_id = identity::IdentityStore::userIdFromPublicKey(ed25519_public);
+  return identity::IdentityStore::toHex(device_id);
 }
 
 crypto::SignedPreKeyPair decodeSignedPrekey(const storage::PrekeyRecord& record) {
@@ -283,7 +289,7 @@ void Core::start(const NodeConfig& config) {
 
   ensurePreKeys();
 
-  std::string local_peer = userIdFromDevice(activeDevice().ed25519_public);
+  std::string local_peer = deviceIdFromDevice(activeDevice().ed25519_public);
   switch (config_.transport_kind) {
     case TransportKind::Loopback: {
       if (!config_.loopback_network) {
@@ -312,6 +318,9 @@ void Core::start(const NodeConfig& config) {
     if (onError) {
       onError(peer, err);
     }
+  };
+  session_manager_->onDeviceRevoked = [this](const std::string& device_id) {
+    handleDeviceRevoked(device_id);
   };
   session_manager_->start();
   for (const auto& peer_id : storage_->listSessionPeers()) {
@@ -374,7 +383,7 @@ void Core::tick(int64_t now_ms) {
 }
 
 std::string Core::localUserId() const {
-  return userIdFromDevice(activeDevice().ed25519_public);
+  return userIdFromIdentity(identity_.active.public_key);
 }
 
 crypto::PreKeyBundle Core::localPreKeyBundle() const {
@@ -395,7 +404,7 @@ crypto::PreKeyBundle Core::localPreKeyBundle() const {
     one_time_public = pub;
   }
   identity::DeviceKeyPair device = activeDevice();
-  return crypto::createPreKeyBundle(device, signed_prekey, one_time_public, 0);
+  return crypto::createPreKeyBundle(identity_.active, device, signed_prekey, one_time_public, 0);
 }
 
 std::string Core::localIceDescription() const {
@@ -418,7 +427,8 @@ std::string Core::beginLink() const {
 std::string Core::addContact(const crypto::PreKeyBundle& bundle) {
   identity::DeviceKeyPair device = activeDevice();
   crypto::InitiatorKeys initiator;
-  initiator.identity_ed25519 = device.ed25519_public;
+  initiator.identity_ed25519 = identity_.active.public_key;
+  initiator.device_ed25519 = device.ed25519_public;
   initiator.identity_x25519_public = device.x25519_public;
   initiator.identity_x25519_private = device.x25519_private;
 
@@ -429,7 +439,14 @@ std::string Core::addContact(const crypto::PreKeyBundle& bundle) {
   crypto::Ratchet ratchet = crypto::Ratchet::initInitiator(init.root_key,
                                                            init.ratchet_key,
                                                            init.remote_ratchet_pub);
-  std::string peer_id = userIdFromDevice(bundle.identity_ed25519);
+  std::string peer_id = deviceIdFromDevice(bundle.device_ed25519);
+  storage::ContactRecord contact;
+  contact.peer_id = peer_id;
+  contact.identity_ed25519 = bundle.identity_ed25519;
+  contact.device_ed25519 = bundle.device_ed25519;
+  contact.created_at_ms = nowMs();
+  contact.updated_at_ms = contact.created_at_ms;
+  storage_->upsertContact(contact);
   session_manager_->addSession(peer_id, session_id, ratchet);
 
   PendingHandshake pending;
@@ -449,6 +466,9 @@ std::string Core::addContact(const crypto::PreKeyBundle& bundle) {
 }
 
 void Core::connectPeer(const transport::PeerInfo& info) {
+  if (storage_->isDeviceRevoked(info.id)) {
+    return;
+  }
   peer_info_[info.id] = info;
   transport_->connect(info);
   if (pending_handshakes_.find(info.id) != pending_handshakes_.end()) {
@@ -459,6 +479,9 @@ void Core::connectPeer(const transport::PeerInfo& info) {
 void Core::send(const std::string& chat_id,
                 const std::vector<uint8_t>& plaintext,
                 uint8_t content_type) {
+  if (storage_->isDeviceRevoked(chat_id)) {
+    throw std::runtime_error("peer device revoked");
+  }
   session_manager_->sendMessage(chat_id, chat_id, plaintext, content_type);
 }
 
@@ -473,6 +496,39 @@ void Core::linkDevice(const std::string& link_code) {
   addContact(bundle);
 }
 
+void Core::revokeDevice(const std::string& device_id) {
+  security::RevocationPayload payload;
+  payload.device_id = security::fromHex32(device_id);
+  payload.revoked_at_ms = nowMs();
+  std::vector<uint8_t> sign_bytes = security::revocationSignBytes(payload.version,
+                                                                  payload.device_id,
+                                                                  payload.revoked_at_ms);
+  payload.signature = crypto::ed25519Sign(identity_.active.seed, sign_bytes.data(), sign_bytes.size());
+
+  storage::RevocationRecord record;
+  record.device_id = device_id;
+  record.identity_ed25519 = identity_.active.public_key;
+  record.revoked_at_ms = payload.revoked_at_ms;
+  record.signature = payload.signature;
+  storage_->storeRevocation(record);
+  handleDeviceRevoked(device_id);
+
+  std::vector<uint8_t> encoded = security::encodeRevocationPayload(payload);
+  auto contacts = storage_->listContacts();
+  for (const auto& contact : contacts) {
+    if (contact.peer_id == device_id) {
+      continue;
+    }
+    if (!session_manager_->hasSession(contact.peer_id)) {
+      continue;
+    }
+    session_manager_->sendMessage(contact.peer_id,
+                                  contact.peer_id,
+                                  encoded,
+                                  static_cast<uint8_t>(session::ContentType::DeviceRevocation));
+  }
+}
+
 void Core::ensurePreKeys() {
   auto signed_meta = storage_->getMeta("signed_prekey_id");
   if (!signed_meta) {
@@ -480,9 +536,9 @@ void Core::ensurePreKeys() {
   }
   auto signed_record = storage_->loadPrekey(config_.signed_prekey_id);
   if (!signed_record || signed_record->public_key.size() != 96) {
-    identity::DeviceKeyPair device = activeDevice();
-    crypto::SignedPreKeyPair signed_prekey = crypto::createSignedPreKey(device, config_.signed_prekey_id);
-    storage_->storePrekey(encodeSignedPrekey(signed_prekey));
+  identity::DeviceKeyPair device = activeDevice();
+  crypto::SignedPreKeyPair signed_prekey = crypto::createSignedPreKey(identity_.active, config_.signed_prekey_id);
+  storage_->storePrekey(encodeSignedPrekey(signed_prekey));
   }
 
   auto next_id_blob = storage_->getMeta("one_time_next_id");
@@ -515,6 +571,9 @@ identity::DeviceKeyPair Core::activeDevice() const {
 
 void Core::handleTransportReceive(const transport::PeerId& peer, transport::Frame&& frame) {
   if (!running_) {
+    return;
+  }
+  if (storage_ && storage_->isDeviceRevoked(peer)) {
     return;
   }
   try {
@@ -579,11 +638,25 @@ void Core::handleTransportWritable(const transport::PeerId& peer, bool writable)
 }
 
 void Core::handleHandshakeInit(const transport::PeerId& peer, const std::vector<uint8_t>& payload) {
+  if (storage_->isDeviceRevoked(peer)) {
+    throw std::runtime_error("handshake from revoked device");
+  }
   std::vector<uint8_t> session_id;
   std::vector<uint8_t> prekey_message;
   decodeHandshakeInit(payload, session_id, prekey_message);
 
   crypto::PreKeyMessage message = crypto::parsePreKeyMessage(prekey_message);
+  std::string expected_peer = deviceIdFromDevice(message.initiator_device_ed25519);
+  if (expected_peer != peer) {
+    throw std::runtime_error("handshake device mismatch");
+  }
+  storage::ContactRecord contact;
+  contact.peer_id = peer;
+  contact.identity_ed25519 = message.initiator_identity_ed25519;
+  contact.device_ed25519 = message.initiator_device_ed25519;
+  contact.created_at_ms = nowMs();
+  contact.updated_at_ms = contact.created_at_ms;
+  storage_->upsertContact(contact);
   auto signed_record = storage_->loadPrekey(message.signed_prekey_id);
   if (!signed_record) {
     throw std::runtime_error("signed prekey not found");
@@ -636,6 +709,10 @@ void Core::sendHandshakeInit(const transport::PeerId& peer) {
   if (it == pending_handshakes_.end()) {
     return;
   }
+  if (storage_->isDeviceRevoked(peer)) {
+    pending_handshakes_.erase(peer);
+    return;
+  }
   PendingHandshake& pending = it->second;
   std::vector<uint8_t> init_payload = encodeHandshakeInit(pending.session_id, pending.prekey_message);
   std::vector<uint8_t> frame_bytes = encodeHandshake(HandshakeType::Init, init_payload);
@@ -643,6 +720,20 @@ void Core::sendHandshakeInit(const transport::PeerId& peer) {
   pending.attempts += 1;
   int64_t delay = nextDelay(config_.handshake_base_delay_ms, config_.handshake_max_delay_ms, pending.attempts - 1);
   pending.next_retry_ms = nowMs() + delay;
+}
+
+void Core::handleDeviceRevoked(const std::string& device_id) {
+  pending_handshakes_.erase(device_id);
+  peer_info_.erase(device_id);
+  if (session_manager_) {
+    session_manager_->dropSession(device_id);
+  }
+  if (transport_) {
+    transport_->disconnect(device_id);
+  }
+  if (storage_) {
+    storage_->clearOutboxForPeer(device_id);
+  }
 }
 
 std::string Core::encodeLinkBundle(const crypto::PreKeyBundle& bundle) const {

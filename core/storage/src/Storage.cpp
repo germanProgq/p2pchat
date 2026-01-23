@@ -16,7 +16,7 @@ namespace storage {
 
 namespace {
 
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 constexpr uint32_t kSessionStateMagic = 0x324E5353;
 constexpr uint32_t kSessionStateVersion = 2;
 
@@ -416,7 +416,7 @@ bool Storage::isOpen() const {
 
 void Storage::ensureSchema() {
   int version = db_->userVersion();
-  if (version == 0) {
+  if (version == 0 || version < kSchemaVersion) {
     std::string schema = readFile(options_.schema_path);
     if (schema.empty()) {
       throw std::runtime_error("schema file empty");
@@ -598,6 +598,80 @@ std::vector<ChatSummary> Storage::listChats() const {
   return chats;
 }
 
+void Storage::upsertContact(const ContactRecord& contact) {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db,
+                 "INSERT INTO contacts(peer_id, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms)"
+                 " VALUES(?, ?, ?, ?, ?)"
+                 " ON CONFLICT(peer_id) DO UPDATE SET identity_ed25519 = excluded.identity_ed25519,"
+                 " device_ed25519 = excluded.device_ed25519, updated_at_ms = excluded.updated_at_ms;");
+  bindText(stmt.get(), 1, contact.peer_id);
+  bindBlob(stmt.get(), 2, contact.identity_ed25519);
+  bindBlob(stmt.get(), 3, contact.device_ed25519);
+  bindInt64(stmt.get(), 4, contact.created_at_ms);
+  bindInt64(stmt.get(), 5, contact.updated_at_ms);
+  if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
+    throw std::runtime_error("sqlite upsert contact failed");
+  }
+}
+
+std::optional<ContactRecord> Storage::loadContact(const std::string& peer_id) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db,
+                 "SELECT identity_ed25519, device_ed25519, created_at_ms, updated_at_ms FROM contacts WHERE peer_id = ?;");
+  bindText(stmt.get(), 1, peer_id);
+  int rc = sqlite3_step(stmt.get());
+  if (rc == SQLITE_DONE) {
+    return std::nullopt;
+  }
+  if (rc != SQLITE_ROW) {
+    throw std::runtime_error("sqlite load contact failed");
+  }
+  ContactRecord record;
+  record.peer_id = peer_id;
+  auto identity_blob = columnBlob(stmt.get(), 0);
+  auto device_blob = columnBlob(stmt.get(), 1);
+  if (identity_blob.size() != record.identity_ed25519.size() ||
+      device_blob.size() != record.device_ed25519.size()) {
+    throw std::runtime_error("contact key size mismatch");
+  }
+  std::copy(identity_blob.begin(), identity_blob.end(), record.identity_ed25519.begin());
+  std::copy(device_blob.begin(), device_blob.end(), record.device_ed25519.begin());
+  record.created_at_ms = columnInt64(stmt.get(), 2);
+  record.updated_at_ms = columnInt64(stmt.get(), 3);
+  return record;
+}
+
+std::vector<ContactRecord> Storage::listContacts() const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  std::vector<ContactRecord> contacts;
+  Statement stmt(db_->db,
+                 "SELECT peer_id, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms"
+                 " FROM contacts ORDER BY updated_at_ms DESC;");
+  while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+    ContactRecord record;
+    record.peer_id = columnText(stmt.get(), 0);
+    auto identity_blob = columnBlob(stmt.get(), 1);
+    auto device_blob = columnBlob(stmt.get(), 2);
+    if (identity_blob.size() != record.identity_ed25519.size() ||
+        device_blob.size() != record.device_ed25519.size()) {
+      throw std::runtime_error("contact key size mismatch");
+    }
+    std::copy(identity_blob.begin(), identity_blob.end(), record.identity_ed25519.begin());
+    std::copy(device_blob.begin(), device_blob.end(), record.device_ed25519.begin());
+    record.created_at_ms = columnInt64(stmt.get(), 3);
+    record.updated_at_ms = columnInt64(stmt.get(), 4);
+    contacts.push_back(std::move(record));
+  }
+  return contacts;
+}
+
 bool Storage::messageExists(const std::string& chat_id, const std::string& msg_id) const {
   if (!db_) {
     throw std::runtime_error("storage not open");
@@ -639,6 +713,68 @@ void Storage::markMessageAcked(const std::string& chat_id, const std::string& ms
   if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
     throw std::runtime_error("sqlite update acked failed");
   }
+}
+
+void Storage::storeRevocation(const RevocationRecord& record) {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db,
+                 "INSERT INTO revocations(device_id, identity_ed25519, revoked_at_ms, signature)"
+                 " VALUES(?, ?, ?, ?)"
+                 " ON CONFLICT(device_id) DO UPDATE SET identity_ed25519 = excluded.identity_ed25519,"
+                 " revoked_at_ms = excluded.revoked_at_ms, signature = excluded.signature;");
+  bindText(stmt.get(), 1, record.device_id);
+  bindBlob(stmt.get(), 2, record.identity_ed25519);
+  bindInt64(stmt.get(), 3, record.revoked_at_ms);
+  bindBlob(stmt.get(), 4, record.signature);
+  if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
+    throw std::runtime_error("sqlite upsert revocation failed");
+  }
+}
+
+std::optional<RevocationRecord> Storage::loadRevocation(const std::string& device_id) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db,
+                 "SELECT identity_ed25519, revoked_at_ms, signature FROM revocations WHERE device_id = ?;");
+  bindText(stmt.get(), 1, device_id);
+  int rc = sqlite3_step(stmt.get());
+  if (rc == SQLITE_DONE) {
+    return std::nullopt;
+  }
+  if (rc != SQLITE_ROW) {
+    throw std::runtime_error("sqlite load revocation failed");
+  }
+  RevocationRecord record;
+  record.device_id = device_id;
+  auto identity_blob = columnBlob(stmt.get(), 0);
+  auto signature_blob = columnBlob(stmt.get(), 2);
+  if (identity_blob.size() != record.identity_ed25519.size() ||
+      signature_blob.size() != record.signature.size()) {
+    throw std::runtime_error("revocation key size mismatch");
+  }
+  std::copy(identity_blob.begin(), identity_blob.end(), record.identity_ed25519.begin());
+  std::copy(signature_blob.begin(), signature_blob.end(), record.signature.begin());
+  record.revoked_at_ms = columnInt64(stmt.get(), 1);
+  return record;
+}
+
+bool Storage::isDeviceRevoked(const std::string& device_id) const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db, "SELECT 1 FROM revocations WHERE device_id = ? LIMIT 1;");
+  bindText(stmt.get(), 1, device_id);
+  int rc = sqlite3_step(stmt.get());
+  if (rc == SQLITE_ROW) {
+    return true;
+  }
+  if (rc != SQLITE_DONE) {
+    throw std::runtime_error("sqlite select revocation failed");
+  }
+  return false;
 }
 
 int64_t Storage::enqueueOutbox(const std::string& peer_device,
@@ -735,6 +871,17 @@ void Storage::removeOutbox(int64_t id) {
   bindInt64(stmt.get(), 1, id);
   if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
     throw std::runtime_error("sqlite delete outbox failed");
+  }
+}
+
+void Storage::clearOutboxForPeer(const std::string& peer_device) {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  Statement stmt(db_->db, "DELETE FROM outbox WHERE peer_device = ?;");
+  bindText(stmt.get(), 1, peer_device);
+  if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
+    throw std::runtime_error("sqlite clear outbox failed");
   }
 }
 

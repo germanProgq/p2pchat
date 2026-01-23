@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "crypto/Primitives.h"
+#include "security/Revocation.h"
 
 namespace session {
 
@@ -609,6 +610,12 @@ bool SessionManager::hasSession(const transport::PeerId& peer) const {
   return sessions_.find(peer) != sessions_.end();
 }
 
+void SessionManager::dropSession(const transport::PeerId& peer) {
+  sessions_.erase(peer);
+  config_.storage->deleteSession(peer);
+  config_.storage->clearOutboxForPeer(peer);
+}
+
 void SessionManager::sendMessage(const transport::PeerId& peer,
                                  const std::string& chat_id,
                                  const std::vector<uint8_t>& plaintext,
@@ -616,6 +623,9 @@ void SessionManager::sendMessage(const transport::PeerId& peer,
   auto it = sessions_.find(peer);
   if (it == sessions_.end()) {
     throw std::runtime_error("session missing for peer");
+  }
+  if (config_.storage->isDeviceRevoked(peer)) {
+    throw std::runtime_error("peer device revoked");
   }
   Session& session = it->second;
   IncomingMessage message;
@@ -628,7 +638,6 @@ void SessionManager::sendMessage(const transport::PeerId& peer,
   std::vector<uint8_t> aad = ratchetAad(session.state.session_id, message.chat_id, message.msg_id);
   crypto::RatchetMessage ratchet_msg = session.ratchet->encrypt(plaintext, aad);
   std::vector<uint8_t> ratchet_bytes = encodeRatchetMessage(ratchet_msg);
-  std::vector<uint8_t> stored_payload = encodeStoredPayload(content_type, plaintext, ratchet_bytes);
   std::vector<uint8_t> payload = encodeAppPayload(message, ratchet_bytes);
 
   std::vector<uint8_t> frame_bytes = buildFrame(session.state,
@@ -639,11 +648,14 @@ void SessionManager::sendMessage(const transport::PeerId& peer,
                                                 config_.frame_aead,
                                                 config_.max_padding);
 
-  config_.storage->appendMessage(chat_id,
-                                 message.msg_id,
-                                 message.sender_device,
-                                 message.ts_ms,
-                                 stored_payload);
+  if (content_type != static_cast<uint8_t>(ContentType::DeviceRevocation)) {
+    std::vector<uint8_t> stored_payload = encodeStoredPayload(content_type, plaintext, ratchet_bytes);
+    config_.storage->appendMessage(chat_id,
+                                   message.msg_id,
+                                   message.sender_device,
+                                   message.ts_ms,
+                                   stored_payload);
+  }
 
   int64_t outbox_id = config_.storage->enqueueOutbox(peer, session.state.session_id, frame_bytes, message.ts_ms);
   transport::SendResult result = config_.transport->send(peer, transport::Frame{frame_bytes});
@@ -726,6 +738,9 @@ void SessionManager::handleReceive(const transport::PeerId& peer, transport::Fra
   if (it == sessions_.end()) {
     return;
   }
+  if (config_.storage->isDeviceRevoked(peer)) {
+    return;
+  }
   Session& session = it->second;
   try {
     auto decoded = decodeFrame(session.frame_key, config_.frame_aead, frame.bytes);
@@ -765,13 +780,44 @@ void SessionManager::handleReceive(const transport::PeerId& peer, transport::Fra
         crypto::RatchetMessage ratchet_msg = decodeRatchetMessage(ratchet_bytes);
         std::vector<uint8_t> aad = ratchetAad(session.state.session_id, incoming.chat_id, incoming.msg_id);
         std::vector<uint8_t> plaintext = session.ratchet->decrypt(ratchet_msg, aad);
-        std::vector<uint8_t> stored_payload = encodeStoredPayload(incoming.content_type, plaintext, ratchet_bytes);
-        config_.storage->appendMessage(incoming.chat_id, incoming.msg_id, peer, incoming.ts_ms, stored_payload);
-        IncomingMessage notify = incoming;
-        notify.sender_device = peer;
-        notify.body = std::move(plaintext);
-        if (onMessage) {
-          onMessage(notify);
+        if (incoming.content_type == static_cast<uint8_t>(ContentType::DeviceRevocation)) {
+          security::RevocationPayload revocation = security::decodeRevocationPayload(plaintext);
+          auto contact = config_.storage->loadContact(peer);
+          if (!contact) {
+            throw std::runtime_error("revocation sender unknown");
+          }
+          std::vector<uint8_t> sign_bytes = security::revocationSignBytes(revocation.version,
+                                                                          revocation.device_id,
+                                                                          revocation.revoked_at_ms);
+          if (!crypto::ed25519Verify(contact->identity_ed25519,
+                                     sign_bytes.data(),
+                                     sign_bytes.size(),
+                                     revocation.signature)) {
+            throw std::runtime_error("revocation signature invalid");
+          }
+          std::string device_id = security::toHex(revocation.device_id);
+          auto target = config_.storage->loadContact(device_id);
+          if (target && target->identity_ed25519 != contact->identity_ed25519) {
+            throw std::runtime_error("revocation identity mismatch");
+          }
+          storage::RevocationRecord record;
+          record.device_id = device_id;
+          record.identity_ed25519 = contact->identity_ed25519;
+          record.revoked_at_ms = revocation.revoked_at_ms;
+          record.signature = revocation.signature;
+          config_.storage->storeRevocation(record);
+          if (onDeviceRevoked) {
+            onDeviceRevoked(device_id);
+          }
+        } else {
+          std::vector<uint8_t> stored_payload = encodeStoredPayload(incoming.content_type, plaintext, ratchet_bytes);
+          config_.storage->appendMessage(incoming.chat_id, incoming.msg_id, peer, incoming.ts_ms, stored_payload);
+          IncomingMessage notify = incoming;
+          notify.sender_device = peer;
+          notify.body = std::move(plaintext);
+          if (onMessage) {
+            onMessage(notify);
+          }
         }
         std::vector<uint8_t> ack_payload = encodeAckPayload(incoming.chat_id, incoming.msg_id);
         std::vector<uint8_t> ack_frame = buildFrame(session.state,
