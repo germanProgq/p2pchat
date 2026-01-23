@@ -84,6 +84,9 @@ PreKeyBundle createPreKeyBundle(const identity::DeviceKeyPair& device_keys,
                                 const std::optional<OneTimePreKeyPublic>& one_time_prekey,
                                 uint32_t capabilities);
 
+std::vector<uint8_t> serializePreKeyBundle(const PreKeyBundle& bundle);
+PreKeyBundle parsePreKeyBundle(const std::vector<uint8_t>& data);
+
 std::array<uint8_t, 64> signSignedPreKey(const std::array<uint8_t, 32>& identity_seed,
                                          uint32_t id,
                                          const std::array<uint8_t, 32>& public_key);

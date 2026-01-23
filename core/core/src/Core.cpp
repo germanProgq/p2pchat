@@ -238,51 +238,6 @@ storage::PrekeyRecord encodeOneTimePrekey(const crypto::OneTimePreKeyPair& preke
   return record;
 }
 
-std::vector<uint8_t> serializePreKeyBundle(const crypto::PreKeyBundle& bundle) {
-  std::vector<uint8_t> out;
-  out.push_back(static_cast<uint8_t>(bundle.version));
-  out.push_back(static_cast<uint8_t>(bundle.has_one_time ? 1 : 0));
-  writeU32(out, bundle.capabilities);
-  out.insert(out.end(), bundle.identity_ed25519.begin(), bundle.identity_ed25519.end());
-  out.insert(out.end(), bundle.identity_x25519.begin(), bundle.identity_x25519.end());
-  writeU32(out, bundle.signed_prekey.id);
-  out.insert(out.end(), bundle.signed_prekey.public_key.begin(), bundle.signed_prekey.public_key.end());
-  out.insert(out.end(), bundle.signed_prekey.signature.begin(), bundle.signed_prekey.signature.end());
-  if (bundle.has_one_time) {
-    writeU32(out, bundle.one_time_prekey.id);
-    out.insert(out.end(), bundle.one_time_prekey.public_key.begin(), bundle.one_time_prekey.public_key.end());
-  }
-  return out;
-}
-
-crypto::PreKeyBundle parsePreKeyBundle(const std::vector<uint8_t>& data) {
-  size_t offset = 0;
-  if (data.size() < 1 + 1 + 4 + 32 + 32 + 4 + 32 + 64) {
-    throw std::runtime_error("prekey bundle truncated");
-  }
-  crypto::PreKeyBundle bundle;
-  bundle.version = data[offset++];
-  bundle.has_one_time = data[offset++] != 0;
-  bundle.capabilities = readU32(data, offset);
-  std::memcpy(bundle.identity_ed25519.data(), data.data() + offset, 32);
-  offset += 32;
-  std::memcpy(bundle.identity_x25519.data(), data.data() + offset, 32);
-  offset += 32;
-  bundle.signed_prekey.id = readU32(data, offset);
-  std::memcpy(bundle.signed_prekey.public_key.data(), data.data() + offset, 32);
-  offset += 32;
-  std::memcpy(bundle.signed_prekey.signature.data(), data.data() + offset, 64);
-  offset += 64;
-  if (bundle.has_one_time) {
-    if (offset + 4 + 32 > data.size()) {
-      throw std::runtime_error("prekey bundle one-time truncated");
-    }
-    bundle.one_time_prekey.id = readU32(data, offset);
-    std::memcpy(bundle.one_time_prekey.public_key.data(), data.data() + offset, 32);
-  }
-  return bundle;
-}
-
 int64_t nextDelay(int64_t base_delay, int64_t max_delay, uint32_t attempts) {
   int64_t delay = base_delay;
   for (uint32_t i = 0; i < attempts; ++i) {
@@ -401,6 +356,12 @@ void Core::tick(int64_t now_ms) {
   session_manager_->tick(now_ms);
   for (auto& entry : pending_handshakes_) {
     if (entry.second.attempts >= config_.handshake_max_attempts) {
+      if (!entry.second.failed_notified) {
+        if (onPeerStatus) {
+          onPeerStatus(entry.first, PeerStatus::Failed);
+        }
+        entry.second.failed_notified = true;
+      }
       continue;
     }
     if (now_ms >= entry.second.next_retry_ms) {
@@ -474,6 +435,9 @@ std::string Core::addContact(const crypto::PreKeyBundle& bundle) {
   pending.attempts = 0;
   pending.next_retry_ms = 0;
   pending_handshakes_[peer_id] = std::move(pending);
+  if (onPeerStatus) {
+    onPeerStatus(peer_id, PeerStatus::Pending);
+  }
 
   if (transport_->state(peer_id) == transport::ConnectionState::Connected) {
     sendHandshakeInit(peer_id);
@@ -639,6 +603,9 @@ void Core::handleHandshakeInit(const transport::PeerId& peer, const std::vector<
                                                            signed_prekey.key_pair,
                                                            responder.remote_ratchet_pub);
   session_manager_->addSession(peer, session_id, ratchet);
+  if (onPeerStatus) {
+    onPeerStatus(peer, PeerStatus::Ready);
+  }
 
   std::vector<uint8_t> ack_payload = encodeHandshakeAck(session_id, 0);
   std::vector<uint8_t> ack_frame = encodeHandshake(HandshakeType::Ack, ack_payload);
@@ -650,9 +617,15 @@ void Core::handleHandshakeAck(const transport::PeerId& peer, const std::vector<u
   uint8_t status = 0;
   decodeHandshakeAck(payload, session_id, status);
   if (status != 0) {
+    if (onPeerStatus) {
+      onPeerStatus(peer, PeerStatus::Failed);
+    }
     throw std::runtime_error("handshake rejected");
   }
   pending_handshakes_.erase(peer);
+  if (onPeerStatus) {
+    onPeerStatus(peer, PeerStatus::Ready);
+  }
 }
 
 void Core::sendHandshakeInit(const transport::PeerId& peer) {
@@ -670,11 +643,11 @@ void Core::sendHandshakeInit(const transport::PeerId& peer) {
 }
 
 std::string Core::encodeLinkBundle(const crypto::PreKeyBundle& bundle) const {
-  return bytesToHex(serializePreKeyBundle(bundle));
+  return bytesToHex(crypto::serializePreKeyBundle(bundle));
 }
 
 crypto::PreKeyBundle Core::decodeLinkBundle(const std::string& link_code) const {
-  return parsePreKeyBundle(hexToBytes(link_code));
+  return crypto::parsePreKeyBundle(hexToBytes(link_code));
 }
 
 }

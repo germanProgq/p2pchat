@@ -23,6 +23,12 @@ enum class TransportKind : uint8_t {
   WebRtc = 3
 };
 
+enum class PeerStatus : uint8_t {
+  Pending = 1,
+  Ready = 2,
+  Failed = 3
+};
+
 struct NodeConfig {
   std::string identity_path;
   std::string storage_path;
@@ -67,6 +73,7 @@ class Core {
 
   std::function<void(const session::IncomingMessage&)> onMessage;
   std::function<void(const transport::PeerId&, transport::ConnectionState)> onConnectionChange;
+  std::function<void(const transport::PeerId&, PeerStatus)> onPeerStatus;
   std::function<void(const transport::PeerId&, const std::string&)> onError;
 
  private:
@@ -75,6 +82,7 @@ class Core {
     std::vector<uint8_t> prekey_message;
     int64_t next_retry_ms = 0;
     uint32_t attempts = 0;
+    bool failed_notified = false;
   };
 
   NodeConfig config_{};

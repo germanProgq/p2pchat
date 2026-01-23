@@ -50,6 +50,7 @@ Automated test
 - Mock transport tests for retries, backpressure, and reconnection behavior.
 
 Phase 5: RN Bridge + UI Contract
+Status: done
 SSOT
 - app/bridge/BridgeSpec.md (JSI/TurboModule method signatures + events)
 Manual test

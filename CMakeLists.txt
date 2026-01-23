@@ -119,6 +119,21 @@ target_link_libraries(core
     crypto
 )
 
+add_library(bridge
+  app/bridge/src/Bridge.cpp
+  app/bridge/src/BridgeJson.cpp
+)
+
+target_include_directories(bridge
+  PUBLIC
+    app/bridge/include
+)
+
+target_link_libraries(bridge
+  PUBLIC
+    core
+)
+
 if(APPLE)
   target_link_libraries(identity PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
@@ -225,6 +240,15 @@ target_link_libraries(core_tests
     core
 )
 
+add_executable(bridge_tests
+  tests/bridge_tests.cpp
+)
+
+target_link_libraries(bridge_tests
+  PRIVATE
+    bridge
+)
+
 target_compile_definitions(session_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -261,6 +285,7 @@ add_test(NAME storage_tests COMMAND storage_tests)
 add_test(NAME transport_tests COMMAND transport_tests)
 add_test(NAME session_tests COMMAND session_tests)
 add_test(NAME core_tests COMMAND core_tests)
+add_test(NAME bridge_tests COMMAND bridge_tests)
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh
