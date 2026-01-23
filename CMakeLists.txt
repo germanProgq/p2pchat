@@ -240,6 +240,15 @@ target_link_libraries(core_tests
     core
 )
 
+add_executable(e2e_tests
+  tests/e2e_tests.cpp
+)
+
+target_link_libraries(e2e_tests
+  PRIVATE
+    core
+)
+
 add_executable(bridge_tests
   tests/bridge_tests.cpp
 )
@@ -255,6 +264,11 @@ target_compile_definitions(session_tests
 )
 
 target_compile_definitions(core_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+target_compile_definitions(e2e_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
@@ -290,6 +304,7 @@ add_test(NAME storage_tests COMMAND storage_tests)
 add_test(NAME transport_tests COMMAND transport_tests)
 add_test(NAME session_tests COMMAND session_tests)
 add_test(NAME core_tests COMMAND core_tests)
+add_test(NAME e2e_tests COMMAND e2e_tests)
 add_test(NAME bridge_tests COMMAND bridge_tests)
 
 add_custom_target(check_phase0

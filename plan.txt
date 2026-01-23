@@ -59,6 +59,7 @@ Automated test
 - Integration tests with a fake core; snapshot tests for event payload shapes.
 
 Phase 6: End-to-End P2P (Two Devices)
+Status: done
 SSOT
 - docs/e2e_flow.md (step-by-step connection, sync, and message flow)
 Manual test

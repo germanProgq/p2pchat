@@ -314,6 +314,9 @@ void Core::start(const NodeConfig& config) {
     }
   };
   session_manager_->start();
+  for (const auto& peer_id : storage_->listSessionPeers()) {
+    session_manager_->loadSession(peer_id);
+  }
 
   transport_->onReceive = [this](const transport::PeerId& peer, transport::Frame&& frame) {
     handleTransportReceive(peer, std::move(frame));

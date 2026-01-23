@@ -867,6 +867,18 @@ std::optional<SessionState> Storage::loadSession(const std::string& peer_device)
   return decodeSession(decoded);
 }
 
+std::vector<std::string> Storage::listSessionPeers() const {
+  if (!db_) {
+    throw std::runtime_error("storage not open");
+  }
+  std::vector<std::string> out;
+  Statement stmt(db_->db, "SELECT peer_device FROM sessions ORDER BY peer_device ASC;");
+  while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
+    out.push_back(columnText(stmt.get(), 0));
+  }
+  return out;
+}
+
 void Storage::deleteSession(const std::string& peer_device) {
   if (!db_) {
     throw std::runtime_error("storage not open");

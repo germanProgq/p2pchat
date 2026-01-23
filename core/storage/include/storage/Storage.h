@@ -138,6 +138,7 @@ class Storage {
                    int64_t updated_at_ms);
 
   std::optional<SessionState> loadSession(const std::string& peer_device) const;
+  std::vector<std::string> listSessionPeers() const;
   void deleteSession(const std::string& peer_device);
 
   void storePrekey(const PrekeyRecord& record);
