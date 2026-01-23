@@ -127,6 +127,7 @@ class CoreAdapter final : public CoreBackend {
 
   void start(const core::NodeConfig& config) override;
   void stop() override;
+  void tick(int64_t now_ms);
   std::string addContact(const crypto::PreKeyBundle& bundle) override;
   void send(const std::string& chat_id,
             const std::vector<uint8_t>& plaintext,

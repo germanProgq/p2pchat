@@ -74,6 +74,14 @@ Manual test
 Automated test
 - Static analysis checks for banned crypto calls; fuzz tests for frame parsing.
 
+Phase 8: Desktop App Packaging (macOS/Windows/Linux)
+SSOT
+- docs/desktop_app.md (desktop runtime choice, bridge integration, packaging)
+Manual test
+- Launch desktop app, start core, add contact, send/receive message.
+Automated test
+- Smoke tests for desktop bridge bindings and packaged binary launch.
+
 Notes
 - Each SSOT file should be referenced by code comments and tests.
 - No duplicate specs; updates must happen in the SSOT document for that area.

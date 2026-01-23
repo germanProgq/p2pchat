@@ -31,6 +31,10 @@ void CoreAdapter::stop() {
   core_->stop();
 }
 
+void CoreAdapter::tick(int64_t now_ms) {
+  core_->tick(now_ms);
+}
+
 std::string CoreAdapter::addContact(const crypto::PreKeyBundle& bundle) {
   return core_->addContact(bundle);
 }

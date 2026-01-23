@@ -264,6 +264,11 @@ target_compile_definitions(storage_tests
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+target_compile_definitions(bridge_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 if(APPLE)
   target_link_libraries(identity_tests PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()

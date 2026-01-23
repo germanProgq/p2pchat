@@ -4,10 +4,17 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <filesystem>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "core/Core.h"
+#include "identity/IdentityStore.h"
+#include "transport/LoopbackTransport.h"
 
 namespace {
 
@@ -46,6 +53,42 @@ std::array<uint8_t, 32> makeMasterKey() {
 
 bool bytesEqual(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
   return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
+}
+
+std::filesystem::path uniqueTempPath() {
+  auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+  return std::filesystem::temp_directory_path() / ("p2pchat_bridge_test_" + std::to_string(now));
+}
+
+int64_t nowMs() {
+  using namespace std::chrono;
+  return static_cast<int64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+}
+
+bridge::NodeConfig makeBridgeConfig(const std::filesystem::path& dir,
+                                    transport::LoopbackNetwork& network,
+                                    const std::array<uint8_t, 32>& master_key) {
+  bridge::NodeConfig config;
+  config.identity_path = (dir / "identity.bin").string();
+  config.storage_path = (dir / "store.db").string();
+  config.schema_path = (std::filesystem::path(P2PCHAT_SOURCE_DIR) / "core/storage/schema.sql").string();
+  config.master_key.assign(master_key.begin(), master_key.end());
+  config.transport_kind = bridge::TransportKind::Loopback;
+  config.loopback_network = &network;
+  return config;
+}
+
+core::NodeConfig makeCoreConfig(const std::filesystem::path& dir,
+                                transport::LoopbackNetwork& network,
+                                const std::array<uint8_t, 32>& master_key) {
+  core::NodeConfig config;
+  config.identity_path = (dir / "identity.bin").string();
+  config.storage_path = (dir / "store.db").string();
+  config.schema_path = (std::filesystem::path(P2PCHAT_SOURCE_DIR) / "core/storage/schema.sql").string();
+  config.master_key = std::make_shared<identity::InMemoryKeyStore>(master_key);
+  config.transport_kind = core::TransportKind::Loopback;
+  config.loopback_network = &network;
+  return config;
 }
 
 class FakeCore final : public bridge::CoreBackend {
@@ -269,6 +312,67 @@ void testEventSnapshots() {
   require(snapshots[3] == "{\"peerId\":\"peer-1\",\"message\":\"boom\"}", "error snapshot mismatch");
 }
 
+void testInvalidBundleHandling() {
+  auto backend = std::make_shared<FakeCore>();
+  bridge::Bridge bridge(backend);
+
+  bool threw = false;
+  try {
+    bridge.addContact(std::vector<uint8_t>{0x01, 0x02});
+  } catch (const std::exception&) {
+    threw = true;
+  }
+  require(threw, "invalid bundle did not throw");
+}
+
+void testHandshakeFailureStatus() {
+  transport::LoopbackNetwork network;
+
+  std::filesystem::path dirA = uniqueTempPath();
+  std::filesystem::path dirB = uniqueTempPath();
+  std::filesystem::create_directories(dirA);
+  std::filesystem::create_directories(dirB);
+
+  std::array<uint8_t, 32> master_key = makeMasterKey();
+  bridge::NodeConfig configA = makeBridgeConfig(dirA, network, master_key);
+  configA.handshake_base_delay_ms = 1;
+  configA.handshake_max_delay_ms = 1;
+  configA.handshake_max_attempts = 2;
+
+  core::NodeConfig configB = makeCoreConfig(dirB, network, master_key);
+
+  core::Core peer_core;
+  peer_core.start(configB);
+  std::vector<uint8_t> bundle = crypto::serializePreKeyBundle(peer_core.localPreKeyBundle());
+
+  auto backend = std::make_shared<bridge::CoreAdapter>();
+  bridge::Bridge bridge(backend);
+  bridge.start(configA);
+
+  std::vector<bridge::PeerStatus> statuses;
+  std::string peer_id;
+  bridge.onPeerStatus = [&](const bridge::PeerStatusEvent& event) {
+    if (peer_id.empty()) {
+      peer_id = event.peer_id;
+    }
+    statuses.push_back(event.status);
+  };
+
+  std::string returned_peer = bridge.addContact(bundle);
+  if (peer_id.empty()) {
+    peer_id = returned_peer;
+  }
+
+  int64_t start = nowMs();
+  for (int i = 0; i < 4; ++i) {
+    backend->tick(start + i * 1000);
+  }
+
+  require(!statuses.empty(), "peer status missing");
+  require(statuses.front() == bridge::PeerStatus::Pending, "pending status missing");
+  require(statuses.back() == bridge::PeerStatus::Failed, "failed status missing");
+}
+
 }
 
 int main() {
@@ -277,6 +381,8 @@ int main() {
       {"bridge_add_contact_send", testAddContactAndSend},
       {"bridge_history_mapping", testHistoryMapping},
       {"bridge_event_snapshots", testEventSnapshots},
+      {"bridge_invalid_bundle", testInvalidBundleHandling},
+      {"bridge_handshake_failure_status", testHandshakeFailureStatus},
   };
 
   int failures = 0;
