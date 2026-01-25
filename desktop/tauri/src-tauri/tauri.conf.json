@@ -1,0 +1,34 @@
+{
+  "build": {
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build",
+    "devPath": "http://localhost:5173",
+    "distDir": "../ui/dist"
+  },
+  "package": {
+    "productName": "p2pchat",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "windows": [
+      {
+        "title": "p2pchat",
+        "width": 1240,
+        "height": 820,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.p2pchat.desktop",
+      "icon": [],
+      "resources": [
+        "../../../core/storage/schema.sql"
+      ]
+    }
+  }
+}

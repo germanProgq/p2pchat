@@ -31,7 +31,7 @@
 #include <wincrypt.h>
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 #include <libsecret/secret.h>
 #endif
 
@@ -636,7 +636,7 @@ std::array<uint8_t, 32> loadOrCreateDpapiKey(const std::string& service_name) {
 }
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) && !defined(__ANDROID__)
 const SecretSchema* linuxSchema() {
   static const SecretSchema schema = {
       "com.p2pchat.identity",
@@ -703,14 +703,14 @@ std::array<uint8_t, 32> loadOrCreateMasterKey(const std::string& service_name) {
   return loadOrCreateKeychainKey(service_name);
 #elif defined(_WIN32)
   return loadOrCreateDpapiKey(service_name);
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(__ANDROID__)
   return loadOrCreateSecretKey(service_name);
 #else
   throw std::runtime_error("unsupported platform for master key storage");
 #endif
 }
 
-}  // namespace
+}
 
 OsKeyStore::OsKeyStore(std::string service_name) : service_name_(std::move(service_name)) {}
 
@@ -865,4 +865,4 @@ std::string IdentityStore::toHex(const std::array<uint8_t, 32>& bytes) {
   return out;
 }
 
-}  // namespace identity
+}

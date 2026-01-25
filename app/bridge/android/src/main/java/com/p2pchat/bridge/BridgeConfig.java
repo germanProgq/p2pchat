@@ -1,6 +1,8 @@
 // Android bridge config parsing. Spec: app/bridge/BridgeSpec.md.
 package com.p2pchat.bridge;
 
+import android.content.Context;
+
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReadableType;
@@ -16,6 +18,8 @@ final class BridgeConfig {
   final String identityPath;
   final String storagePath;
   final String schemaPath;
+  final String username;
+  final String password;
   final byte[] masterKey;
   final String transportKind;
   final TransportConfig transport;
@@ -31,6 +35,8 @@ final class BridgeConfig {
   private BridgeConfig(String identityPath,
                        String storagePath,
                        String schemaPath,
+                       String username,
+                       String password,
                        byte[] masterKey,
                        String transportKind,
                        TransportConfig transport,
@@ -45,6 +51,8 @@ final class BridgeConfig {
     this.identityPath = identityPath;
     this.storagePath = storagePath;
     this.schemaPath = schemaPath;
+    this.username = username;
+    this.password = password;
     this.masterKey = masterKey;
     this.transportKind = transportKind;
     this.transport = transport;
@@ -58,10 +66,12 @@ final class BridgeConfig {
     this.handshakeMaxAttempts = handshakeMaxAttempts;
   }
 
-  static BridgeConfig fromReadableMap(ReadableMap map) {
+  static BridgeConfig fromReadableMap(Context context, ReadableMap map) {
     String identityPath = requireString(map, "identityPath");
     String storagePath = requireString(map, "storagePath");
     String schemaPath = requireString(map, "schemaPath");
+    String username = optString(map, "username", "");
+    String password = optString(map, "password", "");
 
     byte[] masterKey = null;
     if (map.hasKey("masterKey") && !map.isNull("masterKey")) {
@@ -73,6 +83,9 @@ final class BridgeConfig {
       } else if (dynamic.getType() == ReadableType.Map) {
         masterKey = BridgePayloads.bytesFromObject(dynamic.asMap());
       }
+    }
+    if (masterKey == null) {
+      masterKey = BridgeKeyStore.loadOrCreate(context);
     }
 
     String transportKind = optString(map, "transportKind", "quic");
@@ -91,6 +104,8 @@ final class BridgeConfig {
     return new BridgeConfig(identityPath,
         storagePath,
         schemaPath,
+        username,
+        password,
         masterKey,
         transportKind,
         transport,

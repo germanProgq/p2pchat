@@ -86,6 +86,7 @@ struct ChatSummary {
 
 struct ContactRecord {
   std::string peer_id;
+  std::string username;
   std::array<uint8_t, 32> identity_ed25519{};
   std::array<uint8_t, 32> device_ed25519{};
   int64_t created_at_ms = 0;

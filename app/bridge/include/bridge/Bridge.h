@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,8 @@ struct NodeConfig {
   std::string identity_path;
   std::string storage_path;
   std::string schema_path;
+  std::string username;
+  std::string password;
   std::vector<uint8_t> master_key;
   TransportKind transport_kind = TransportKind::Quic;
   transport::TransportConfig transport{};
@@ -66,6 +69,7 @@ struct IncomingMessage {
   std::string chat_id;
   std::string msg_id;
   std::string sender_device;
+  std::string peer_username;
   int64_t ts_ms = 0;
   ContentType content_type = ContentType::Binary;
   std::vector<uint8_t> body;
@@ -75,6 +79,7 @@ struct HistoryMessage {
   std::string chat_id;
   std::string msg_id;
   std::string sender_device;
+  std::string peer_username;
   int64_t ts_ms = 0;
   ContentType content_type = ContentType::Binary;
   std::vector<uint8_t> body;
@@ -85,17 +90,27 @@ struct HistoryMessage {
 
 struct ConnectionEvent {
   std::string peer_id;
+  std::string peer_username;
   ConnectionState state = ConnectionState::Disconnected;
 };
 
 struct PeerStatusEvent {
   std::string peer_id;
+  std::string peer_username;
   PeerStatus status = PeerStatus::Pending;
 };
 
 struct ErrorEvent {
   std::string peer_id;
+  std::string peer_username;
   std::string message;
+};
+
+struct PeerInfo {
+  std::string peer_id;
+  std::string address;
+  uint16_t port = 0;
+  std::string ice_blob;
 };
 
 class CoreBackend {
@@ -104,7 +119,12 @@ class CoreBackend {
 
   virtual void start(const core::NodeConfig& config) = 0;
   virtual void stop() = 0;
+  virtual std::vector<uint8_t> localBundle() const = 0;
+  virtual std::string localIce() const = 0;
+  virtual std::string beginLink() const = 0;
   virtual std::string addContact(const crypto::PreKeyBundle& bundle) = 0;
+  virtual std::string addContactWithUsername(const crypto::PreKeyBundle& bundle, const std::string& username) = 0;
+  virtual void connectPeer(const transport::PeerInfo& info) = 0;
   virtual void send(const std::string& chat_id,
                     const std::vector<uint8_t>& plaintext,
                     uint8_t content_type) = 0;
@@ -112,6 +132,11 @@ class CoreBackend {
                                                           int64_t start_index,
                                                           size_t limit) const = 0;
   virtual void linkDevice(const std::string& link_code) = 0;
+  virtual std::optional<std::string> lookupUsername(const std::string& peer_id) const = 0;
+  virtual std::string localUsername() const = 0;
+  virtual std::vector<uint8_t> localIdentityPublicKey() const = 0;
+  virtual std::vector<uint8_t> signIdentity(const std::vector<uint8_t>& message) const = 0;
+  virtual void updateProfile(const std::string& username, const std::string& password) = 0;
 
   std::function<void(const session::IncomingMessage&)> onMessage;
   std::function<void(const transport::PeerId&, transport::ConnectionState)> onConnectionChange;
@@ -127,8 +152,13 @@ class CoreAdapter final : public CoreBackend {
 
   void start(const core::NodeConfig& config) override;
   void stop() override;
+  std::vector<uint8_t> localBundle() const override;
+  std::string localIce() const override;
+  std::string beginLink() const override;
   void tick(int64_t now_ms);
   std::string addContact(const crypto::PreKeyBundle& bundle) override;
+  std::string addContactWithUsername(const crypto::PreKeyBundle& bundle, const std::string& username) override;
+  void connectPeer(const transport::PeerInfo& info) override;
   void send(const std::string& chat_id,
             const std::vector<uint8_t>& plaintext,
             uint8_t content_type) override;
@@ -136,6 +166,11 @@ class CoreAdapter final : public CoreBackend {
                                                   int64_t start_index,
                                                   size_t limit) const override;
   void linkDevice(const std::string& link_code) override;
+  std::optional<std::string> lookupUsername(const std::string& peer_id) const override;
+  std::string localUsername() const override;
+  std::vector<uint8_t> localIdentityPublicKey() const override;
+  std::vector<uint8_t> signIdentity(const std::vector<uint8_t>& message) const override;
+  void updateProfile(const std::string& username, const std::string& password) override;
 
  private:
   std::unique_ptr<core::Core> core_;
@@ -147,13 +182,22 @@ class Bridge {
   explicit Bridge(std::shared_ptr<CoreBackend> backend);
 
   void start(const NodeConfig& config);
+  std::vector<uint8_t> localBundle() const;
+  std::string localIce() const;
+  std::string beginLink() const;
   std::string addContact(const std::vector<uint8_t>& prekey_bundle);
+  std::string addContactWithUsername(const std::vector<uint8_t>& prekey_bundle, const std::string& username);
+  void connectPeer(const PeerInfo& info);
   void send(const std::string& chat_id, const std::string& text);
   void send(const std::string& chat_id, const std::vector<uint8_t>& bytes);
   std::vector<HistoryMessage> getHistory(const std::string& chat_id,
                                          int64_t start_index,
                                          size_t limit) const;
   void linkDevice(const std::string& link_code);
+  std::string localUsername() const;
+  std::vector<uint8_t> localIdentityPublicKey() const;
+  std::vector<uint8_t> signIdentity(const std::vector<uint8_t>& message) const;
+  void updateProfile(const std::string& username, const std::string& password);
 
   std::function<void(const IncomingMessage&)> onMessage;
   std::function<void(const ConnectionEvent&)> onConnectionChange;

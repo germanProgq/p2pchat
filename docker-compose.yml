@@ -1,0 +1,15 @@
+services:
+  directory:
+    build:
+      context: ./tools/directory
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      P2PCHAT_DIRECTORY_DATA: "/data/data.json"
+    volumes:
+      - directory-data:/data
+    restart: unless-stopped
+
+volumes:
+  directory-data:

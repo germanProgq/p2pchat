@@ -45,8 +45,42 @@ public final class BridgeModule extends ReactContextBaseJavaModule implements Tu
 
   @ReactMethod
   public void start(ReadableMap config) {
-    BridgeConfig parsed = BridgeConfig.fromReadableMap(config);
+    BridgeConfig parsed = BridgeConfig.fromReadableMap(reactContext, config);
     nativeStart(nativeHandle, parsed);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public byte[] localBundle() {
+    return nativeLocalBundle(nativeHandle);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public String localIce() {
+    return nativeLocalIce(nativeHandle);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public String beginLink() {
+    return nativeBeginLink(nativeHandle);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public String localUsername() {
+    return nativeLocalUsername(nativeHandle);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public byte[] localIdentityPublicKey() {
+    return nativeLocalIdentityPublicKey(nativeHandle);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public byte[] signIdentity(Dynamic message) {
+    if (message == null || message.isNull()) {
+      throw new IllegalArgumentException("message is required");
+    }
+    byte[] bytes = BridgePayloads.bytesFromDynamic(message);
+    return nativeSignIdentity(nativeHandle, bytes);
   }
 
   @ReactMethod(isBlockingSynchronousMethod = true)
@@ -56,6 +90,18 @@ public final class BridgeModule extends ReactContextBaseJavaModule implements Tu
     }
     byte[] bytes = BridgePayloads.bytesFromDynamic(prekeyBundle);
     return nativeAddContact(nativeHandle, bytes);
+  }
+
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public String addContactWithUsername(Dynamic prekeyBundle, String username) {
+    if (prekeyBundle == null || prekeyBundle.isNull()) {
+      throw new IllegalArgumentException(\"prekeyBundle is required\");
+    }
+    if (username == null) {
+      throw new IllegalArgumentException("username is required");
+    }
+    byte[] bytes = BridgePayloads.bytesFromDynamic(prekeyBundle);
+    return nativeAddContactWithUsername(nativeHandle, bytes, username);
   }
 
   @ReactMethod
@@ -82,6 +128,26 @@ public final class BridgeModule extends ReactContextBaseJavaModule implements Tu
   @ReactMethod
   public void linkDevice(String linkCode) {
     nativeLinkDevice(nativeHandle, linkCode);
+  }
+
+  @ReactMethod
+  public void updateProfile(String username, String password) {
+    nativeUpdateProfile(nativeHandle, username, password);
+  }
+
+  @ReactMethod
+  public void connectPeer(ReadableMap peerInfo) {
+    if (peerInfo == null) {
+      throw new IllegalArgumentException("peerInfo is required");
+    }
+    String peerId = peerInfo.hasKey("peerId") ? peerInfo.getString("peerId") : null;
+    String address = peerInfo.hasKey("address") ? peerInfo.getString("address") : null;
+    int port = peerInfo.hasKey("port") ? peerInfo.getInt("port") : 0;
+    String iceBlob = peerInfo.hasKey("iceBlob") ? peerInfo.getString("iceBlob") : null;
+    if (peerId == null || peerId.isEmpty()) {
+      throw new IllegalArgumentException("peerId is required");
+    }
+    nativeConnectPeer(nativeHandle, peerId, address, port, iceBlob);
   }
 
   @ReactMethod
@@ -123,8 +189,17 @@ public final class BridgeModule extends ReactContextBaseJavaModule implements Tu
   private static native long nativeCreate();
   private static native void nativeDestroy(long handle);
   private static native void nativeStart(long handle, BridgeConfig config);
+  private static native byte[] nativeLocalBundle(long handle);
+  private static native String nativeLocalIce(long handle);
+  private static native String nativeBeginLink(long handle);
   private static native String nativeAddContact(long handle, byte[] prekeyBundle);
+  private static native String nativeAddContactWithUsername(long handle, byte[] prekeyBundle, String username);
+  private static native String nativeLocalUsername(long handle);
+  private static native byte[] nativeLocalIdentityPublicKey(long handle);
+  private static native byte[] nativeSignIdentity(long handle, byte[] message);
+  private static native void nativeConnectPeer(long handle, String peerId, String address, int port, String iceBlob);
   private static native void nativeSend(long handle, String chatId, byte[] payload, int contentType);
   private static native String nativeGetHistoryJson(long handle, String chatId, long cursor, int limit);
   private static native void nativeLinkDevice(long handle, String linkCode);
+  private static native void nativeUpdateProfile(long handle, String username, String password);
 }

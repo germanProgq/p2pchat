@@ -52,6 +52,8 @@ export interface NodeConfig {
   identityPath: string;
   storagePath: string;
   schemaPath: string;
+  username?: string;
+  password?: string;
   masterKey?: ArrayBuffer;
   transportKind?: 'quic' | 'webrtc' | 'loopback';
   transport?: TransportConfig;
@@ -69,6 +71,7 @@ export interface IncomingMessage {
   chatId: string;
   msgId: string;
   senderDevice: string;
+  peerUsername: string;
   tsMs: number;
   contentType: ContentType;
   body: ArrayBuffer;
@@ -78,6 +81,7 @@ export interface HistoryMessage {
   chatId: string;
   msgId: string;
   senderDevice: string;
+  peerUsername: string;
   tsMs: number;
   contentType: ContentType;
   body: ArrayBuffer;
@@ -88,10 +92,19 @@ export interface HistoryMessage {
 
 export interface BridgeSpec extends TurboModule {
   start(config: NodeConfig): void;
+  localBundle(): ArrayBuffer;
+  localIce(): string;
+  beginLink(): string;
   addContact(prekeyBundle: ArrayBuffer): string;
+  addContactWithUsername(prekeyBundle: ArrayBuffer, username: string): string;
+  connectPeer(peerInfo: {peerId: string; address?: string; port?: number; iceBlob?: string}): void;
   send(chatId: string, payload: string | ArrayBuffer): void;
   getHistory(chatId: string, cursor: number, limit: number): HistoryMessage[];
   linkDevice(linkCode: string): void;
+  localUsername(): string;
+  localIdentityPublicKey(): ArrayBuffer;
+  signIdentity(message: ArrayBuffer): ArrayBuffer;
+  updateProfile(username: string, password: string): void;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }

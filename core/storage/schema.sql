@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS chats (
 
 CREATE TABLE IF NOT EXISTS contacts (
   peer_id TEXT PRIMARY KEY,
+  username TEXT UNIQUE,
   identity_ed25519 BLOB NOT NULL,
   device_ed25519 BLOB NOT NULL,
   created_at_ms INTEGER NOT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS contacts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contacts_updated ON contacts(updated_at_ms);
+CREATE INDEX IF NOT EXISTS idx_contacts_username ON contacts(username);
 
 CREATE TABLE IF NOT EXISTS messages (
   chat_id TEXT NOT NULL,
@@ -84,4 +86,4 @@ CREATE TABLE IF NOT EXISTS revocations (
 
 CREATE INDEX IF NOT EXISTS idx_revocations_revoked_at ON revocations(revoked_at_ms);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;

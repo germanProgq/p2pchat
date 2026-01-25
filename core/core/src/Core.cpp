@@ -11,6 +11,8 @@
 #include "crypto/Primitives.h"
 #include "security/Revocation.h"
 #include "transport/Ice.h"
+#include <openssl/evp.h>
+#include <openssl/rand.h>
 
 namespace core {
 
@@ -19,6 +21,15 @@ namespace {
 constexpr char kHandshakeMagic[4] = {'P', '2', 'P', 'H'};
 constexpr uint8_t kHandshakeVersion = 1;
 constexpr size_t kSessionIdSize = 16;
+constexpr size_t kPasswordSaltSize = 16;
+constexpr size_t kPasswordHashSize = 32;
+constexpr uint32_t kPasswordIterations = 200000;
+
+const char* kMetaUsername = "local_username";
+const char* kMetaPasswordSalt = "auth_salt";
+const char* kMetaPasswordHash = "auth_hash";
+const char* kMetaPasswordIter = "auth_iter";
+const char* kMetaPasswordUpdated = "auth_updated";
 
 enum class HandshakeType : uint8_t {
   Init = 1,
@@ -36,6 +47,12 @@ void writeU32(std::vector<uint8_t>& out, uint32_t value) {
   }
 }
 
+void writeU64(std::vector<uint8_t>& out, uint64_t value) {
+  for (int i = 0; i < 8; ++i) {
+    out.push_back(static_cast<uint8_t>((value >> (8 * i)) & 0xFF));
+  }
+}
+
 uint32_t readU32(const std::vector<uint8_t>& data, size_t& offset) {
   if (offset + 4 > data.size()) {
     throw std::runtime_error("handshake parse overflow");
@@ -45,6 +62,18 @@ uint32_t readU32(const std::vector<uint8_t>& data, size_t& offset) {
     value |= static_cast<uint32_t>(data[offset + i]) << (8 * i);
   }
   offset += 4;
+  return value;
+}
+
+uint64_t readU64(const std::vector<uint8_t>& data, size_t& offset) {
+  if (offset + 8 > data.size()) {
+    throw std::runtime_error("handshake parse overflow");
+  }
+  uint64_t value = 0;
+  for (int i = 0; i < 8; ++i) {
+    value |= static_cast<uint64_t>(data[offset + i]) << (8 * i);
+  }
+  offset += 8;
   return value;
 }
 
@@ -147,12 +176,26 @@ std::vector<uint8_t> u32ToBytes(uint32_t value) {
   return out;
 }
 
+std::vector<uint8_t> u64ToBytes(uint64_t value) {
+  std::vector<uint8_t> out;
+  writeU64(out, value);
+  return out;
+}
+
 uint32_t u32FromBytes(const std::vector<uint8_t>& data, uint32_t fallback) {
   if (data.size() != 4) {
     return fallback;
   }
   size_t offset = 0;
   return readU32(data, offset);
+}
+
+uint64_t u64FromBytes(const std::vector<uint8_t>& data, uint64_t fallback) {
+  if (data.size() != 8) {
+    return fallback;
+  }
+  size_t offset = 0;
+  return readU64(data, offset);
 }
 
 std::string bytesToHex(const std::vector<uint8_t>& bytes) {
@@ -200,6 +243,206 @@ std::string userIdFromIdentity(const std::array<uint8_t, 32>& ed25519_public) {
 std::string deviceIdFromDevice(const std::array<uint8_t, 32>& ed25519_public) {
   std::array<uint8_t, 32> device_id = identity::IdentityStore::userIdFromPublicKey(ed25519_public);
   return identity::IdentityStore::toHex(device_id);
+}
+
+struct PasswordMetadata {
+  std::array<uint8_t, kPasswordSaltSize> salt{};
+  std::array<uint8_t, kPasswordHashSize> hash{};
+  uint32_t iterations = kPasswordIterations;
+  int64_t updated_at_ms = 0;
+};
+
+std::array<uint8_t, kPasswordHashSize> derivePasswordHash(const std::string& password,
+                                                          const std::array<uint8_t, kPasswordSaltSize>& salt,
+                                                          uint32_t iterations) {
+  std::array<uint8_t, kPasswordHashSize> out{};
+  if (password.empty()) {
+    throw std::runtime_error("password required");
+  }
+  int ok = PKCS5_PBKDF2_HMAC(password.data(),
+                              static_cast<int>(password.size()),
+                              salt.data(),
+                              static_cast<int>(salt.size()),
+                              static_cast<int>(iterations),
+                              EVP_sha256(),
+                              static_cast<int>(out.size()),
+                              out.data());
+  if (ok != 1) {
+    throw std::runtime_error("password hash failed");
+  }
+  return out;
+}
+
+bool validateUsername(const std::string& username) {
+  if (username.size() < 3 || username.size() > 32) {
+    return false;
+  }
+  for (char c : username) {
+    if ((c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') ||
+        c == '_' || c == '-' || c == '.') {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool validatePassword(const std::string& password) {
+  if (password.size() < 8 || password.size() > 128) {
+    return false;
+  }
+  return true;
+}
+
+bool constantTimeEqual(const uint8_t* left, const uint8_t* right, size_t len) {
+  uint8_t diff = 0;
+  for (size_t i = 0; i < len; ++i) {
+    diff |= static_cast<uint8_t>(left[i] ^ right[i]);
+  }
+  return diff == 0;
+}
+
+std::optional<PasswordMetadata> loadPasswordMetadata(storage::Storage* storage) {
+  auto salt_blob = storage->getMeta(kMetaPasswordSalt);
+  auto hash_blob = storage->getMeta(kMetaPasswordHash);
+  if (!salt_blob || !hash_blob) {
+    return std::nullopt;
+  }
+  if (salt_blob->size() != kPasswordSaltSize || hash_blob->size() != kPasswordHashSize) {
+    throw std::runtime_error("password metadata size mismatch");
+  }
+  PasswordMetadata meta;
+  std::copy(salt_blob->begin(), salt_blob->end(), meta.salt.begin());
+  std::copy(hash_blob->begin(), hash_blob->end(), meta.hash.begin());
+  auto iter_blob = storage->getMeta(kMetaPasswordIter);
+  if (iter_blob) {
+    meta.iterations = u32FromBytes(*iter_blob, kPasswordIterations);
+  }
+  auto updated_blob = storage->getMeta(kMetaPasswordUpdated);
+  if (updated_blob) {
+    meta.updated_at_ms = static_cast<int64_t>(u64FromBytes(*updated_blob, 0));
+  }
+  return meta;
+}
+
+void storePasswordMetadata(storage::Storage* storage,
+                           const std::string& password,
+                           int64_t now_ms,
+                           uint32_t iterations,
+                           PasswordMetadata& out_meta) {
+  if (!validatePassword(password)) {
+    throw std::runtime_error("password must be 8-128 characters");
+  }
+  std::array<uint8_t, kPasswordSaltSize> salt{};
+  if (RAND_bytes(salt.data(), static_cast<int>(salt.size())) != 1) {
+    throw std::runtime_error("password salt generation failed");
+  }
+  std::array<uint8_t, kPasswordHashSize> hash = derivePasswordHash(password, salt, iterations);
+  storage->setMeta(kMetaPasswordSalt, std::vector<uint8_t>(salt.begin(), salt.end()));
+  storage->setMeta(kMetaPasswordHash, std::vector<uint8_t>(hash.begin(), hash.end()));
+  storage->setMeta(kMetaPasswordIter, u32ToBytes(iterations));
+  storage->setMeta(kMetaPasswordUpdated, u64ToBytes(static_cast<uint64_t>(now_ms)));
+  out_meta.salt = salt;
+  out_meta.hash = hash;
+  out_meta.iterations = iterations;
+  out_meta.updated_at_ms = now_ms;
+  crypto::secureZero(hash.data(), hash.size());
+}
+
+bool verifyPassword(storage::Storage* storage, const std::string& password, PasswordMetadata& out_meta) {
+  auto existing = loadPasswordMetadata(storage);
+  if (!existing) {
+    return false;
+  }
+  out_meta = *existing;
+  std::array<uint8_t, kPasswordHashSize> computed = derivePasswordHash(password,
+                                                                       out_meta.salt,
+                                                                       out_meta.iterations);
+  bool ok = constantTimeEqual(computed.data(),
+                              out_meta.hash.data(),
+                              out_meta.hash.size());
+  crypto::secureZero(computed.data(), computed.size());
+  return ok;
+}
+
+std::vector<uint8_t> encodeSettingsUpdate(const std::string& username,
+                                          const PasswordMetadata* password_meta,
+                                          int64_t updated_at_ms) {
+  std::vector<uint8_t> out;
+  out.reserve(4 + username.size() + kPasswordSaltSize + kPasswordHashSize);
+  out.push_back(1);
+  uint8_t flags = 0;
+  if (!username.empty()) {
+    flags |= 0x01;
+  }
+  if (password_meta) {
+    flags |= 0x02;
+  }
+  out.push_back(flags);
+  writeU64(out, static_cast<uint64_t>(updated_at_ms));
+  if (!username.empty()) {
+    if (username.size() > 0xFFFF) {
+      throw std::runtime_error("username too long");
+    }
+    uint16_t len = static_cast<uint16_t>(username.size());
+    out.push_back(static_cast<uint8_t>(len & 0xFF));
+    out.push_back(static_cast<uint8_t>((len >> 8) & 0xFF));
+    out.insert(out.end(), username.begin(), username.end());
+  }
+  if (password_meta) {
+    out.insert(out.end(), password_meta->salt.begin(), password_meta->salt.end());
+    out.insert(out.end(), password_meta->hash.begin(), password_meta->hash.end());
+    writeU32(out, password_meta->iterations);
+  }
+  return out;
+}
+
+void decodeSettingsUpdate(const std::vector<uint8_t>& payload,
+                          std::string& username,
+                          std::optional<PasswordMetadata>& password_meta,
+                          int64_t& updated_at_ms) {
+  if (payload.size() < 2 + 8) {
+    throw std::runtime_error("settings update truncated");
+  }
+  size_t offset = 0;
+  uint8_t version = payload[offset++];
+  if (version != 1) {
+    throw std::runtime_error("settings update version mismatch");
+  }
+  uint8_t flags = payload[offset++];
+  updated_at_ms = static_cast<int64_t>(readU64(payload, offset));
+  if (flags & 0x01) {
+    if (offset + 2 > payload.size()) {
+      throw std::runtime_error("settings update username length missing");
+    }
+    uint16_t len = static_cast<uint16_t>(payload[offset] | (payload[offset + 1] << 8));
+    offset += 2;
+    if (offset + len > payload.size()) {
+      throw std::runtime_error("settings update username truncated");
+    }
+    username.assign(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+                    payload.begin() + static_cast<std::ptrdiff_t>(offset + len));
+    offset += len;
+  }
+  if (flags & 0x02) {
+    if (offset + kPasswordSaltSize + kPasswordHashSize + 4 > payload.size()) {
+      throw std::runtime_error("settings update password truncated");
+    }
+    PasswordMetadata meta;
+    std::copy(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+              payload.begin() + static_cast<std::ptrdiff_t>(offset + kPasswordSaltSize),
+              meta.salt.begin());
+    offset += kPasswordSaltSize;
+    std::copy(payload.begin() + static_cast<std::ptrdiff_t>(offset),
+              payload.begin() + static_cast<std::ptrdiff_t>(offset + kPasswordHashSize),
+              meta.hash.begin());
+    offset += kPasswordHashSize;
+    meta.iterations = readU32(payload, offset);
+    meta.updated_at_ms = updated_at_ms;
+    password_meta = meta;
+  }
 }
 
 crypto::SignedPreKeyPair decodeSignedPrekey(const storage::PrekeyRecord& record) {
@@ -287,6 +530,45 @@ void Core::start(const NodeConfig& config) {
   storage_ = std::make_unique<storage::Storage>(options);
   storage_->open();
 
+  PasswordMetadata password_meta;
+  auto existing_password = loadPasswordMetadata(storage_.get());
+  if (existing_password) {
+    if (config_.password.empty()) {
+      throw std::runtime_error("password required");
+    }
+    if (!verifyPassword(storage_.get(), config_.password, password_meta)) {
+      throw std::runtime_error("password invalid");
+    }
+  } else {
+    if (config_.password.empty()) {
+      throw std::runtime_error("password required");
+    }
+    storePasswordMetadata(storage_.get(), config_.password, nowMs(), kPasswordIterations, password_meta);
+  }
+  if (!config_.password.empty()) {
+    config_.password.clear();
+  }
+
+  std::string stored_username;
+  auto username_blob = storage_->getMeta(kMetaUsername);
+  if (username_blob) {
+    stored_username.assign(username_blob->begin(), username_blob->end());
+  }
+  if (stored_username.empty()) {
+    if (config_.username.empty()) {
+      throw std::runtime_error("username required");
+    }
+    if (!validateUsername(config_.username)) {
+      throw std::runtime_error("username must be 3-32 chars of letters, numbers, ., -, _");
+    }
+    storage_->setMeta(kMetaUsername, std::vector<uint8_t>(config_.username.begin(), config_.username.end()));
+  } else if (!config_.username.empty() && config_.username != stored_username) {
+    if (!validateUsername(config_.username)) {
+      throw std::runtime_error("username must be 3-32 chars of letters, numbers, ., -, _");
+    }
+    storage_->setMeta(kMetaUsername, std::vector<uint8_t>(config_.username.begin(), config_.username.end()));
+  }
+
   ensurePreKeys();
 
   std::string local_peer = deviceIdFromDevice(activeDevice().ed25519_public);
@@ -321,6 +603,9 @@ void Core::start(const NodeConfig& config) {
   };
   session_manager_->onDeviceRevoked = [this](const std::string& device_id) {
     handleDeviceRevoked(device_id);
+  };
+  session_manager_->onSettingsUpdate = [this](const transport::PeerId& peer, const std::vector<uint8_t>& payload) {
+    handleSettingsUpdate(peer, payload);
   };
   session_manager_->start();
   for (const auto& peer_id : storage_->listSessionPeers()) {
@@ -386,6 +671,26 @@ std::string Core::localUserId() const {
   return userIdFromIdentity(identity_.active.public_key);
 }
 
+std::string Core::localUsername() const {
+  if (!storage_) {
+    return {};
+  }
+  auto blob = storage_->getMeta(kMetaUsername);
+  if (!blob) {
+    return {};
+  }
+  return std::string(blob->begin(), blob->end());
+}
+
+std::array<uint8_t, 32> Core::localIdentityPublicKey() const {
+  return identity_.active.public_key;
+}
+
+std::vector<uint8_t> Core::signIdentity(const std::vector<uint8_t>& message) const {
+  std::array<uint8_t, 64> sig = crypto::ed25519Sign(identity_.active.seed, message.data(), message.size());
+  return std::vector<uint8_t>(sig.begin(), sig.end());
+}
+
 crypto::PreKeyBundle Core::localPreKeyBundle() const {
   auto signed_prekey_record = storage_->loadPrekey(config_.signed_prekey_id);
   if (!signed_prekey_record) {
@@ -425,6 +730,10 @@ std::string Core::beginLink() const {
 }
 
 std::string Core::addContact(const crypto::PreKeyBundle& bundle) {
+  return addContact(bundle, "");
+}
+
+std::string Core::addContact(const crypto::PreKeyBundle& bundle, const std::string& username) {
   identity::DeviceKeyPair device = activeDevice();
   crypto::InitiatorKeys initiator;
   initiator.identity_ed25519 = identity_.active.public_key;
@@ -442,6 +751,7 @@ std::string Core::addContact(const crypto::PreKeyBundle& bundle) {
   std::string peer_id = deviceIdFromDevice(bundle.device_ed25519);
   storage::ContactRecord contact;
   contact.peer_id = peer_id;
+  contact.username = username;
   contact.identity_ed25519 = bundle.identity_ed25519;
   contact.device_ed25519 = bundle.device_ed25519;
   contact.created_at_ms = nowMs();
@@ -527,6 +837,64 @@ void Core::revokeDevice(const std::string& device_id) {
                                   encoded,
                                   static_cast<uint8_t>(session::ContentType::DeviceRevocation));
   }
+}
+
+void Core::updateProfile(const std::string& username, const std::string& password) {
+  if (!storage_) {
+    throw std::runtime_error("core not started");
+  }
+  bool updated = false;
+  int64_t now = nowMs();
+
+  if (!username.empty()) {
+    if (!validateUsername(username)) {
+      throw std::runtime_error("username must be 3-32 chars of letters, numbers, ., -, _");
+    }
+    storage_->setMeta(kMetaUsername, std::vector<uint8_t>(username.begin(), username.end()));
+    updated = true;
+  }
+
+  std::optional<PasswordMetadata> password_meta;
+  if (!password.empty()) {
+    PasswordMetadata meta;
+    storePasswordMetadata(storage_.get(), password, now, kPasswordIterations, meta);
+    password_meta = meta;
+    updated = true;
+  }
+
+  if (!updated) {
+    return;
+  }
+
+  std::string local_device = deviceIdFromDevice(activeDevice().ed25519_public);
+  auto contacts = storage_->listContacts();
+  for (const auto& contact : contacts) {
+    if (contact.peer_id == local_device) {
+      continue;
+    }
+    if (contact.identity_ed25519 != identity_.active.public_key) {
+      continue;
+    }
+    if (!session_manager_ || !session_manager_->hasSession(contact.peer_id)) {
+      continue;
+    }
+    std::vector<uint8_t> payload = encodeSettingsUpdate(username, password_meta ? &(*password_meta) : nullptr, now);
+    session_manager_->sendMessage(contact.peer_id,
+                                  contact.peer_id,
+                                  payload,
+                                  static_cast<uint8_t>(session::ContentType::SettingsUpdate));
+  }
+}
+
+std::optional<std::string> Core::contactUsername(const std::string& peer_id) const {
+  if (!storage_) {
+    return std::nullopt;
+  }
+  auto contact = storage_->loadContact(peer_id);
+  if (!contact || contact->username.empty()) {
+    return std::nullopt;
+  }
+  return contact->username;
 }
 
 void Core::ensurePreKeys() {
@@ -733,6 +1101,45 @@ void Core::handleDeviceRevoked(const std::string& device_id) {
   }
   if (storage_) {
     storage_->clearOutboxForPeer(device_id);
+  }
+}
+
+void Core::handleSettingsUpdate(const transport::PeerId& peer, const std::vector<uint8_t>& payload) {
+  if (!storage_) {
+    return;
+  }
+  auto contact = storage_->loadContact(peer);
+  if (!contact || contact->identity_ed25519 != identity_.active.public_key) {
+    return;
+  }
+  std::string username;
+  std::optional<PasswordMetadata> password_meta;
+  int64_t updated_at_ms = 0;
+  try {
+    decodeSettingsUpdate(payload, username, password_meta, updated_at_ms);
+  } catch (...) {
+    return;
+  }
+
+  auto existing_updated = storage_->getMeta(kMetaPasswordUpdated);
+  int64_t current_updated = 0;
+  if (existing_updated) {
+    current_updated = static_cast<int64_t>(u64FromBytes(*existing_updated, 0));
+  }
+  if (updated_at_ms < current_updated) {
+    return;
+  }
+  if (!username.empty()) {
+    if (!validateUsername(username)) {
+      return;
+    }
+    storage_->setMeta(kMetaUsername, std::vector<uint8_t>(username.begin(), username.end()));
+  }
+  if (password_meta) {
+    storage_->setMeta(kMetaPasswordSalt, std::vector<uint8_t>(password_meta->salt.begin(), password_meta->salt.end()));
+    storage_->setMeta(kMetaPasswordHash, std::vector<uint8_t>(password_meta->hash.begin(), password_meta->hash.end()));
+    storage_->setMeta(kMetaPasswordIter, u32ToBytes(password_meta->iterations));
+    storage_->setMeta(kMetaPasswordUpdated, u64ToBytes(static_cast<uint64_t>(updated_at_ms)));
   }
 }
 

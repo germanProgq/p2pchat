@@ -10,6 +10,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "core/Core.h"
@@ -73,6 +74,8 @@ bridge::NodeConfig makeBridgeConfig(const std::filesystem::path& dir,
   config.identity_path = (dir / "identity.bin").string();
   config.storage_path = (dir / "store.db").string();
   config.schema_path = (std::filesystem::path(P2PCHAT_SOURCE_DIR) / "core/storage/schema.sql").string();
+  config.username = "bridge-user";
+  config.password = "password123";
   config.master_key.assign(master_key.begin(), master_key.end());
   config.transport_kind = bridge::TransportKind::Loopback;
   config.loopback_network = &network;
@@ -86,6 +89,8 @@ core::NodeConfig makeCoreConfig(const std::filesystem::path& dir,
   config.identity_path = (dir / "identity.bin").string();
   config.storage_path = (dir / "store.db").string();
   config.schema_path = (std::filesystem::path(P2PCHAT_SOURCE_DIR) / "core/storage/schema.sql").string();
+  config.username = "core-user";
+  config.password = "password123";
   config.master_key = std::make_shared<identity::InMemoryKeyStore>(master_key);
   config.transport_kind = core::TransportKind::Loopback;
   config.loopback_network = &network;
@@ -103,10 +108,38 @@ class FakeCore final : public bridge::CoreBackend {
     stop_calls++;
   }
 
+  std::vector<uint8_t> localBundle() const override {
+    return local_bundle;
+  }
+
+  std::string localIce() const override {
+    return local_ice;
+  }
+
+  std::string beginLink() const override {
+    return link_code;
+  }
+
   std::string addContact(const crypto::PreKeyBundle& bundle) override {
     last_bundle = bundle;
     has_bundle = true;
     return peer_id;
+  }
+
+  std::string addContactWithUsername(const crypto::PreKeyBundle& bundle,
+                                     const std::string& username) override {
+    last_bundle = bundle;
+    has_bundle = true;
+    last_username = username;
+    if (!username.empty()) {
+      peer_usernames[peer_id] = username;
+    }
+    return peer_id;
+  }
+
+  void connectPeer(const transport::PeerInfo& info) override {
+    last_peer = info;
+    connect_calls++;
   }
 
   void send(const std::string& chat_id,
@@ -126,6 +159,36 @@ class FakeCore final : public bridge::CoreBackend {
 
   void linkDevice(const std::string& link_code) override {
     last_link_code = link_code;
+  }
+
+  std::optional<std::string> lookupUsername(const std::string& peer_id) const override {
+    auto it = peer_usernames.find(peer_id);
+    if (it == peer_usernames.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  std::string localUsername() const override {
+    return local_username;
+  }
+
+  std::vector<uint8_t> localIdentityPublicKey() const override {
+    return identity_public_key;
+  }
+
+  std::vector<uint8_t> signIdentity(const std::vector<uint8_t>& message) const override {
+    std::vector<uint8_t> sig(64, 0);
+    for (size_t i = 0; i < sig.size(); ++i) {
+      uint8_t value = i < message.size() ? message[i] : 0;
+      sig[i] = static_cast<uint8_t>(value ^ 0x5a);
+    }
+    return sig;
+  }
+
+  void updateProfile(const std::string& username, const std::string& password) override {
+    updated_username = username;
+    updated_password = password;
   }
 
   void emitMessage(const session::IncomingMessage& msg) {
@@ -155,15 +218,26 @@ class FakeCore final : public bridge::CoreBackend {
   int start_calls = 0;
   int stop_calls = 0;
   int send_calls = 0;
+  int connect_calls = 0;
   std::string peer_id = "peer-1";
   core::NodeConfig last_config{};
   crypto::PreKeyBundle last_bundle{};
   bool has_bundle = false;
+  std::vector<uint8_t> local_bundle{0x01, 0x02, 0x03};
+  std::string local_ice = "ice-blob";
+  std::string link_code = "link-code";
+  transport::PeerInfo last_peer{};
   std::string last_send_chat;
   std::vector<uint8_t> last_send_bytes;
   uint8_t last_send_type = 0;
   std::vector<session::HistoryMessage> history;
   std::string last_link_code;
+  std::string local_username = "local-user";
+  std::string last_username;
+  std::unordered_map<std::string, std::string> peer_usernames{{"peer-1", "buddy"}};
+  std::vector<uint8_t> identity_public_key = std::vector<uint8_t>(32, 0x11);
+  std::string updated_username;
+  std::string updated_password;
 };
 
 void testStartConfig() {
@@ -174,6 +248,8 @@ void testStartConfig() {
   config.identity_path = "id.bin";
   config.storage_path = "store.db";
   config.schema_path = "schema.sql";
+  config.username = "tester";
+  config.password = "password123";
   config.transport_kind = bridge::TransportKind::WebRtc;
   config.transport.max_in_flight = 9;
   config.transport.max_queue_bytes = 4096;
@@ -200,6 +276,8 @@ void testStartConfig() {
   require(backend->last_config.identity_path == config.identity_path, "identity path mismatch");
   require(backend->last_config.storage_path == config.storage_path, "storage path mismatch");
   require(backend->last_config.schema_path == config.schema_path, "schema path mismatch");
+  require(backend->last_config.username == config.username, "username mismatch");
+  require(backend->last_config.password == config.password, "password mismatch");
   require(backend->last_config.transport_kind == core::TransportKind::WebRtc, "transport kind mismatch");
   require(backend->last_config.transport.max_in_flight == config.transport.max_in_flight, "max_in_flight mismatch");
   require(backend->last_config.transport.max_queue_bytes == config.transport.max_queue_bytes, "max_queue_bytes mismatch");
@@ -267,12 +345,39 @@ void testHistoryMapping() {
   require(history[0].chat_id == msg.chat_id, "history chat mismatch");
   require(history[0].msg_id == msg.msg_id, "history msg id mismatch");
   require(history[0].sender_device == msg.sender_device, "history sender mismatch");
+  require(history[0].peer_username == "buddy", "history peer username mismatch");
   require(history[0].ts_ms == msg.ts_ms, "history timestamp mismatch");
   require(history[0].content_type == bridge::ContentType::Text, "history content type mismatch");
   require(bytesEqual(history[0].body, msg.body), "history body mismatch");
   require(history[0].delivered == msg.delivered, "history delivered mismatch");
   require(history[0].acked == msg.acked, "history acked mismatch");
   require(history[0].index == msg.index, "history index mismatch");
+}
+
+void testLocalBundleAndConnect() {
+  auto backend = std::make_shared<FakeCore>();
+  bridge::Bridge bridge(backend);
+
+  std::vector<uint8_t> bundle = bridge.localBundle();
+  require(bytesEqual(bundle, backend->local_bundle), "local bundle mismatch");
+
+  std::string ice = bridge.localIce();
+  require(ice == backend->local_ice, "local ice mismatch");
+
+  std::string link = bridge.beginLink();
+  require(link == backend->link_code, "link code mismatch");
+
+  bridge::PeerInfo info;
+  info.peer_id = "peer-2";
+  info.address = "127.0.0.1";
+  info.port = 9001;
+  info.ice_blob = "ice-blob-2";
+  bridge.connectPeer(info);
+  require(backend->connect_calls == 1, "connectPeer not called");
+  require(backend->last_peer.id == info.peer_id, "connect peer id mismatch");
+  require(backend->last_peer.address == info.address, "connect address mismatch");
+  require(backend->last_peer.port == info.port, "connect port mismatch");
+  require(backend->last_peer.ice_blob == info.ice_blob, "connect ice mismatch");
 }
 
 void testEventSnapshots() {
@@ -307,10 +412,10 @@ void testEventSnapshots() {
   backend->emitError("peer-1", "boom");
 
   require(snapshots.size() == 4, "snapshot count mismatch");
-  require(snapshots[0] == "{\"chatId\":\"peer-1\",\"msgId\":\"m-1\",\"senderDevice\":\"dev-1\",\"tsMs\":1234,\"contentType\":\"text\",\"body\":[111,107]}", "message snapshot mismatch");
-  require(snapshots[1] == "{\"peerId\":\"peer-1\",\"state\":\"connected\"}", "connection snapshot mismatch");
-  require(snapshots[2] == "{\"peerId\":\"peer-1\",\"status\":\"ready\"}", "peer status snapshot mismatch");
-  require(snapshots[3] == "{\"peerId\":\"peer-1\",\"message\":\"boom\"}", "error snapshot mismatch");
+  require(snapshots[0] == "{\"chatId\":\"peer-1\",\"msgId\":\"m-1\",\"senderDevice\":\"dev-1\",\"peerUsername\":\"buddy\",\"tsMs\":1234,\"contentType\":\"text\",\"body\":[111,107]}", "message snapshot mismatch");
+  require(snapshots[1] == "{\"peerId\":\"peer-1\",\"peerUsername\":\"buddy\",\"state\":\"connected\"}", "connection snapshot mismatch");
+  require(snapshots[2] == "{\"peerId\":\"peer-1\",\"peerUsername\":\"buddy\",\"status\":\"ready\"}", "peer status snapshot mismatch");
+  require(snapshots[3] == "{\"peerId\":\"peer-1\",\"peerUsername\":\"buddy\",\"message\":\"boom\"}", "error snapshot mismatch");
 }
 
 void testInvalidBundleHandling() {
@@ -381,6 +486,7 @@ int main() {
       {"bridge_start_config", testStartConfig},
       {"bridge_add_contact_send", testAddContactAndSend},
       {"bridge_history_mapping", testHistoryMapping},
+      {"bridge_local_bundle_connect", testLocalBundleAndConnect},
       {"bridge_event_snapshots", testEventSnapshots},
       {"bridge_invalid_bundle", testInvalidBundleHandling},
       {"bridge_handshake_failure_status", testHandshakeFailureStatus},

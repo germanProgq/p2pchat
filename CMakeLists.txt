@@ -6,6 +6,28 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(APPLE)
+  find_program(BREW_EXECUTABLE brew)
+  if(BREW_EXECUTABLE AND NOT DEFINED OPENSSL_ROOT_DIR)
+    execute_process(
+      COMMAND ${BREW_EXECUTABLE} --prefix openssl@3
+      OUTPUT_VARIABLE BREW_OPENSSL_PREFIX
+      RESULT_VARIABLE BREW_OPENSSL_RESULT
+    )
+    if(NOT BREW_OPENSSL_RESULT EQUAL 0)
+      execute_process(
+        COMMAND ${BREW_EXECUTABLE} --prefix openssl@1.1
+        OUTPUT_VARIABLE BREW_OPENSSL_PREFIX
+        RESULT_VARIABLE BREW_OPENSSL_RESULT
+      )
+    endif()
+    if(BREW_OPENSSL_RESULT EQUAL 0)
+      string(STRIP "${BREW_OPENSSL_PREFIX}" BREW_OPENSSL_PREFIX)
+      set(OPENSSL_ROOT_DIR "${BREW_OPENSSL_PREFIX}" CACHE PATH "OpenSSL root" FORCE)
+    endif()
+  endif()
+endif()
+
 find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 
@@ -119,6 +141,8 @@ target_link_libraries(core
     storage
     identity
     crypto
+  PRIVATE
+    OpenSSL::Crypto
 )
 
 add_library(bridge
@@ -134,6 +158,36 @@ target_include_directories(bridge
 target_link_libraries(bridge
   PUBLIC
     core
+)
+
+add_library(p2pchat_ffi SHARED
+  desktop/ffi/p2pchat_ffi.cpp
+)
+
+target_include_directories(p2pchat_ffi
+  PUBLIC
+    desktop/ffi
+)
+
+target_link_libraries(p2pchat_ffi
+  PRIVATE
+    bridge
+    core
+)
+
+add_executable(p2pchat_desktop
+  desktop/src/main.cpp
+)
+
+target_link_libraries(p2pchat_desktop
+  PRIVATE
+    bridge
+    core
+)
+
+target_compile_definitions(p2pchat_desktop
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 if(APPLE)
@@ -152,6 +206,36 @@ if(UNIX AND NOT APPLE)
       target_include_directories(identity PRIVATE ${LIBSECRET_INCLUDE_DIRS})
       target_link_libraries(identity PRIVATE ${LIBSECRET_LIBRARIES})
     endif()
+  endif()
+endif()
+
+if(APPLE)
+  target_link_libraries(p2pchat_desktop PRIVATE "-framework Security" "-framework CoreFoundation")
+endif()
+
+if(WIN32)
+  target_link_libraries(p2pchat_desktop PRIVATE Crypt32)
+endif()
+
+if(UNIX AND NOT APPLE)
+  if(LIBSECRET_FOUND)
+    target_include_directories(p2pchat_desktop PRIVATE ${LIBSECRET_INCLUDE_DIRS})
+    target_link_libraries(p2pchat_desktop PRIVATE ${LIBSECRET_LIBRARIES})
+  endif()
+endif()
+
+if(APPLE)
+  target_link_libraries(p2pchat_ffi PRIVATE "-framework Security" "-framework CoreFoundation")
+endif()
+
+if(WIN32)
+  target_link_libraries(p2pchat_ffi PRIVATE Crypt32)
+endif()
+
+if(UNIX AND NOT APPLE)
+  if(LIBSECRET_FOUND)
+    target_include_directories(p2pchat_ffi PRIVATE ${LIBSECRET_INCLUDE_DIRS})
+    target_link_libraries(p2pchat_ffi PRIVATE ${LIBSECRET_LIBRARIES})
   endif()
 endif()
 
@@ -269,6 +353,16 @@ target_link_libraries(security_tests
     session
 )
 
+add_executable(desktop_ffi_tests
+  tests/desktop_ffi_tests.cpp
+)
+
+target_link_libraries(desktop_ffi_tests
+  PRIVATE
+    p2pchat_ffi
+    transport
+)
+
 target_compile_definitions(session_tests
   PRIVATE
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -299,6 +393,11 @@ target_compile_definitions(security_tests
     P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+target_compile_definitions(desktop_ffi_tests
+  PRIVATE
+    P2PCHAT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
 if(APPLE)
   target_link_libraries(identity_tests PRIVATE "-framework Security" "-framework CoreFoundation")
 endif()
@@ -323,8 +422,38 @@ add_test(NAME core_tests COMMAND core_tests)
 add_test(NAME e2e_tests COMMAND e2e_tests)
 add_test(NAME bridge_tests COMMAND bridge_tests)
 add_test(NAME security_tests COMMAND security_tests)
+add_test(NAME desktop_ffi_tests COMMAND desktop_ffi_tests)
+set(P2PCHAT_DESKTOP_PACKAGE_NAME "p2pchat-desktop")
+add_test(NAME desktop_smoke COMMAND $<TARGET_FILE:p2pchat_desktop> --smoke)
+add_test(NAME desktop_package_smoke
+  COMMAND ${CMAKE_COMMAND}
+    -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
+    -DPACKAGE_NAME=${P2PCHAT_DESKTOP_PACKAGE_NAME}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/scripts/desktop_package_smoke.cmake
+)
+
+set_tests_properties(desktop_package_smoke PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_custom_target(check_phase0
   COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+install(TARGETS p2pchat_desktop RUNTIME DESTINATION bin)
+install(FILES core/storage/schema.sql DESTINATION share/p2pchat)
+
+set(CPACK_PACKAGE_NAME "${P2PCHAT_DESKTOP_PACKAGE_NAME}")
+set(CPACK_PACKAGE_VENDOR "p2pchat")
+set(CPACK_PACKAGE_VERSION "0.1.0")
+set(CPACK_PACKAGE_FILE_NAME "${P2PCHAT_DESKTOP_PACKAGE_NAME}")
+set(CPACK_STRIP_FILES ON)
+
+if(APPLE)
+  set(CPACK_GENERATOR "DragNDrop;TGZ")
+elseif(WIN32)
+  set(CPACK_GENERATOR "ZIP")
+else()
+  set(CPACK_GENERATOR "TGZ")
+endif()
+
+include(CPack)

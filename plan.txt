@@ -77,6 +77,7 @@ Automated test
 - Static analysis checks for banned crypto calls; fuzz tests for frame parsing.
 
 Phase 8: Desktop App Packaging (macOS/Windows/Linux)
+Status: done
 SSOT
 - docs/desktop_app.md (desktop runtime choice, bridge integration, packaging)
 Manual test

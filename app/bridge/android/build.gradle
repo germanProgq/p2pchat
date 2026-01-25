@@ -1,0 +1,35 @@
+apply plugin: 'com.android.library'
+
+def safeExtGet(prop, fallback) {
+  return rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}
+
+android {
+  namespace 'com.p2pchat.bridge'
+  compileSdkVersion safeExtGet('compileSdkVersion', 34)
+
+  defaultConfig {
+    minSdkVersion safeExtGet('minSdkVersion', 23)
+    targetSdkVersion safeExtGet('targetSdkVersion', 34)
+    externalNativeBuild {
+      cmake {
+        cppFlags '-std=c++17 -fexceptions -frtti'
+        arguments '-DANDROID_STL=c++_shared'
+      }
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path 'CMakeLists.txt'
+    }
+  }
+
+  packagingOptions {
+    pickFirst '**/libc++_shared.so'
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+}

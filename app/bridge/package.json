@@ -1,0 +1,7 @@
+{
+  "name": "p2pchat-bridge",
+  "version": "0.1.0",
+  "main": "js/index.ts",
+  "react-native": "js/index.ts",
+  "private": true
+}

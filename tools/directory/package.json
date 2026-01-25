@@ -1,0 +1,15 @@
+{
+  "name": "p2pchat-directory",
+  "version": "0.1.0",
+  "private": true,
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "tweetnacl": "^1.0.3"
+  }
+}

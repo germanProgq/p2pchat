@@ -16,7 +16,7 @@ namespace storage {
 
 namespace {
 
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 constexpr uint32_t kSessionStateMagic = 0x324E5353;
 constexpr uint32_t kSessionStateVersion = 2;
 
@@ -276,6 +276,16 @@ void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
   }
 }
 
+void bindOptionalText(sqlite3_stmt* stmt, int index, const std::string& value) {
+  if (value.empty()) {
+    if (sqlite3_bind_null(stmt, index) != SQLITE_OK) {
+      throw std::runtime_error("sqlite bind null failed");
+    }
+    return;
+  }
+  bindText(stmt, index, value);
+}
+
 void bindInt64(sqlite3_stmt* stmt, int index, int64_t value) {
   if (sqlite3_bind_int64(stmt, index, value) != SQLITE_OK) {
     throw std::runtime_error("sqlite bind int64 failed");
@@ -416,13 +426,19 @@ bool Storage::isOpen() const {
 
 void Storage::ensureSchema() {
   int version = db_->userVersion();
-  if (version == 0 || version < kSchemaVersion) {
+  if (version == 0) {
     std::string schema = readFile(options_.schema_path);
     if (schema.empty()) {
       throw std::runtime_error("schema file empty");
     }
     db_->exec(schema);
     version = db_->userVersion();
+  }
+  if (version == 2) {
+    db_->exec("ALTER TABLE contacts ADD COLUMN username TEXT;");
+    db_->exec("CREATE INDEX IF NOT EXISTS idx_contacts_username ON contacts(username);");
+    db_->exec("PRAGMA user_version = 3;");
+    version = 3;
   }
   if (version != kSchemaVersion) {
     throw std::runtime_error("unsupported schema version");
@@ -603,15 +619,17 @@ void Storage::upsertContact(const ContactRecord& contact) {
     throw std::runtime_error("storage not open");
   }
   Statement stmt(db_->db,
-                 "INSERT INTO contacts(peer_id, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms)"
-                 " VALUES(?, ?, ?, ?, ?)"
-                 " ON CONFLICT(peer_id) DO UPDATE SET identity_ed25519 = excluded.identity_ed25519,"
-                 " device_ed25519 = excluded.device_ed25519, updated_at_ms = excluded.updated_at_ms;");
+                 "INSERT INTO contacts(peer_id, username, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms)"
+                 " VALUES(?, ?, ?, ?, ?, ?)"
+                 " ON CONFLICT(peer_id) DO UPDATE SET username = excluded.username,"
+                 " identity_ed25519 = excluded.identity_ed25519, device_ed25519 = excluded.device_ed25519,"
+                 " updated_at_ms = excluded.updated_at_ms;");
   bindText(stmt.get(), 1, contact.peer_id);
-  bindBlob(stmt.get(), 2, contact.identity_ed25519);
-  bindBlob(stmt.get(), 3, contact.device_ed25519);
-  bindInt64(stmt.get(), 4, contact.created_at_ms);
-  bindInt64(stmt.get(), 5, contact.updated_at_ms);
+  bindOptionalText(stmt.get(), 2, contact.username);
+  bindBlob(stmt.get(), 3, contact.identity_ed25519);
+  bindBlob(stmt.get(), 4, contact.device_ed25519);
+  bindInt64(stmt.get(), 5, contact.created_at_ms);
+  bindInt64(stmt.get(), 6, contact.updated_at_ms);
   if (sqlite3_step(stmt.get()) != SQLITE_DONE) {
     throw std::runtime_error("sqlite upsert contact failed");
   }
@@ -622,7 +640,8 @@ std::optional<ContactRecord> Storage::loadContact(const std::string& peer_id) co
     throw std::runtime_error("storage not open");
   }
   Statement stmt(db_->db,
-                 "SELECT identity_ed25519, device_ed25519, created_at_ms, updated_at_ms FROM contacts WHERE peer_id = ?;");
+                 "SELECT username, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms"
+                 " FROM contacts WHERE peer_id = ?;");
   bindText(stmt.get(), 1, peer_id);
   int rc = sqlite3_step(stmt.get());
   if (rc == SQLITE_DONE) {
@@ -633,16 +652,17 @@ std::optional<ContactRecord> Storage::loadContact(const std::string& peer_id) co
   }
   ContactRecord record;
   record.peer_id = peer_id;
-  auto identity_blob = columnBlob(stmt.get(), 0);
-  auto device_blob = columnBlob(stmt.get(), 1);
+  record.username = columnText(stmt.get(), 0);
+  auto identity_blob = columnBlob(stmt.get(), 1);
+  auto device_blob = columnBlob(stmt.get(), 2);
   if (identity_blob.size() != record.identity_ed25519.size() ||
       device_blob.size() != record.device_ed25519.size()) {
     throw std::runtime_error("contact key size mismatch");
   }
   std::copy(identity_blob.begin(), identity_blob.end(), record.identity_ed25519.begin());
   std::copy(device_blob.begin(), device_blob.end(), record.device_ed25519.begin());
-  record.created_at_ms = columnInt64(stmt.get(), 2);
-  record.updated_at_ms = columnInt64(stmt.get(), 3);
+  record.created_at_ms = columnInt64(stmt.get(), 3);
+  record.updated_at_ms = columnInt64(stmt.get(), 4);
   return record;
 }
 
@@ -652,21 +672,22 @@ std::vector<ContactRecord> Storage::listContacts() const {
   }
   std::vector<ContactRecord> contacts;
   Statement stmt(db_->db,
-                 "SELECT peer_id, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms"
+                 "SELECT peer_id, username, identity_ed25519, device_ed25519, created_at_ms, updated_at_ms"
                  " FROM contacts ORDER BY updated_at_ms DESC;");
   while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
     ContactRecord record;
     record.peer_id = columnText(stmt.get(), 0);
-    auto identity_blob = columnBlob(stmt.get(), 1);
-    auto device_blob = columnBlob(stmt.get(), 2);
+    record.username = columnText(stmt.get(), 1);
+    auto identity_blob = columnBlob(stmt.get(), 2);
+    auto device_blob = columnBlob(stmt.get(), 3);
     if (identity_blob.size() != record.identity_ed25519.size() ||
         device_blob.size() != record.device_ed25519.size()) {
       throw std::runtime_error("contact key size mismatch");
     }
     std::copy(identity_blob.begin(), identity_blob.end(), record.identity_ed25519.begin());
     std::copy(device_blob.begin(), device_blob.end(), record.device_ed25519.begin());
-    record.created_at_ms = columnInt64(stmt.get(), 3);
-    record.updated_at_ms = columnInt64(stmt.get(), 4);
+    record.created_at_ms = columnInt64(stmt.get(), 4);
+    record.updated_at_ms = columnInt64(stmt.get(), 5);
     contacts.push_back(std::move(record));
   }
   return contacts;

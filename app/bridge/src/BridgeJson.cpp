@@ -106,6 +106,8 @@ std::string toJsonPayload(const IncomingMessage& message) {
   out += escapeJson(message.msg_id);
   out += "\",\"senderDevice\":\"";
   out += escapeJson(message.sender_device);
+  out += "\",\"peerUsername\":\"";
+  out += escapeJson(message.peer_username);
   out += "\",\"tsMs\":";
   out += std::to_string(message.ts_ms);
   out += ",\"contentType\":\"";
@@ -121,6 +123,8 @@ std::string toJsonPayload(const ConnectionEvent& event) {
   out.reserve(96);
   out += "{\"peerId\":\"";
   out += escapeJson(event.peer_id);
+  out += "\",\"peerUsername\":\"";
+  out += escapeJson(event.peer_username);
   out += "\",\"state\":\"";
   out += connectionStateToString(event.state);
   out += "\"}";
@@ -132,6 +136,8 @@ std::string toJsonPayload(const PeerStatusEvent& event) {
   out.reserve(96);
   out += "{\"peerId\":\"";
   out += escapeJson(event.peer_id);
+  out += "\",\"peerUsername\":\"";
+  out += escapeJson(event.peer_username);
   out += "\",\"status\":\"";
   out += peerStatusToString(event.status);
   out += "\"}";
@@ -143,6 +149,8 @@ std::string toJsonPayload(const ErrorEvent& event) {
   out.reserve(128);
   out += "{\"peerId\":\"";
   out += escapeJson(event.peer_id);
+  out += "\",\"peerUsername\":\"";
+  out += escapeJson(event.peer_username);
   out += "\",\"message\":\"";
   out += escapeJson(event.message);
   out += "\"}";
@@ -158,6 +166,8 @@ std::string toJsonPayload(const HistoryMessage& message) {
   out += escapeJson(message.msg_id);
   out += "\",\"senderDevice\":\"";
   out += escapeJson(message.sender_device);
+  out += "\",\"peerUsername\":\"";
+  out += escapeJson(message.peer_username);
   out += "\",\"tsMs\":";
   out += std::to_string(message.ts_ms);
   out += ",\"contentType\":\"";

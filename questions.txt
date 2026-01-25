@@ -1,0 +1,18 @@
+Questions for UI phase
+1) Desktop UI framework preference: Qt (native C++), Tauri (Rust + Web), Electron (Node + Web), or something else?
+2) Mobile UI: do you want a full React Native app scaffold now, or only the bridge wired into an existing RN project?
+3) Design direction: can you share a design system, palette, or example screens to match?
+4) Required desktop features for v1 UI: chat list, chat view, composer, settings, connection status, device link?
+5) Should desktop use the same core bridge JSON event stream, or a tighter in-process binding layer?
+
+1. Tauri
+2. React app
+3. There is no pallete it is a chatting app
+4. All features we have must be in ui. with smooth animations
+5. in process binding
+Account + Invite Clarifications
+1) Are usernames globally unique (need a directory/DHT), or only unique within a local contact list?
+2) What should the password do: unlock local data only, or also gate network identity (e.g., derive the master key instead of OS keystore)?
+3) How should invites be delivered: out-of-band (copy/share link/QR), or should we build a discovery/rendezvous service for username lookup?
+4) Should the core expose usernames in events/contacts so UI can display them instead of peer IDs?
+5) Multi-device: is the username shared across linked devices, and should password changes propagate?

@@ -109,11 +109,18 @@ const char *requireCString(NSDictionary *config, NSString *key) {
 }
 
 bridge::NodeConfig parseNodeConfig(NSDictionary *config) {
-  // Map JS config dictionary into native config.
   bridge::NodeConfig out;
   out.identity_path = requireCString(config, @"identityPath");
   out.storage_path = requireCString(config, @"storagePath");
   out.schema_path = requireCString(config, @"schemaPath");
+  NSString *username = [config objectForKey:@"username"];
+  NSString *password = [config objectForKey:@"password"];
+  if (username) {
+    out.username = [username UTF8String];
+  }
+  if (password) {
+    out.password = [password UTF8String];
+  }
   id masterKey = [config objectForKey:@"masterKey"];
   out.master_key = bytesFromObject(masterKey);
 
@@ -262,6 +269,7 @@ NSDictionary *incomingToDict(const bridge::IncomingMessage &message) {
     @"chatId": [NSString stringWithUTF8String:message.chat_id.c_str()],
     @"msgId": [NSString stringWithUTF8String:message.msg_id.c_str()],
     @"senderDevice": [NSString stringWithUTF8String:message.sender_device.c_str()],
+    @"peerUsername": [NSString stringWithUTF8String:message.peer_username.c_str()],
     @"tsMs": @(message.ts_ms),
     @"contentType": contentTypeToString(message.content_type),
     @"body": byteArrayFromVector(message.body),
@@ -273,6 +281,7 @@ NSDictionary *historyToDict(const bridge::HistoryMessage &message) {
     @"chatId": [NSString stringWithUTF8String:message.chat_id.c_str()],
     @"msgId": [NSString stringWithUTF8String:message.msg_id.c_str()],
     @"senderDevice": [NSString stringWithUTF8String:message.sender_device.c_str()],
+    @"peerUsername": [NSString stringWithUTF8String:message.peer_username.c_str()],
     @"tsMs": @(message.ts_ms),
     @"contentType": contentTypeToString(message.content_type),
     @"body": byteArrayFromVector(message.body),
@@ -285,6 +294,7 @@ NSDictionary *historyToDict(const bridge::HistoryMessage &message) {
 NSDictionary *connectionToDict(const bridge::ConnectionEvent &event) {
   return @{
     @"peerId": [NSString stringWithUTF8String:event.peer_id.c_str()],
+    @"peerUsername": [NSString stringWithUTF8String:event.peer_username.c_str()],
     @"state": connectionStateToString(event.state),
   };
 }
@@ -292,6 +302,7 @@ NSDictionary *connectionToDict(const bridge::ConnectionEvent &event) {
 NSDictionary *statusToDict(const bridge::PeerStatusEvent &event) {
   return @{
     @"peerId": [NSString stringWithUTF8String:event.peer_id.c_str()],
+    @"peerUsername": [NSString stringWithUTF8String:event.peer_username.c_str()],
     @"status": peerStatusToString(event.status),
   };
 }
@@ -299,6 +310,7 @@ NSDictionary *statusToDict(const bridge::PeerStatusEvent &event) {
 NSDictionary *errorToDict(const bridge::ErrorEvent &event) {
   return @{
     @"peerId": [NSString stringWithUTF8String:event.peer_id.c_str()],
+    @"peerUsername": [NSString stringWithUTF8String:event.peer_username.c_str()],
     @"message": [NSString stringWithUTF8String:event.message.c_str()],
   };
 }
@@ -364,10 +376,81 @@ RCT_EXPORT_METHOD(start:(NSDictionary *)config) {
   _bridge->start(parsed);
 }
 
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(localBundle) {
+  std::vector<uint8_t> bytes = _bridge->localBundle();
+  if (bytes.empty()) {
+    return [NSData data];
+  }
+  return [NSData dataWithBytes:bytes.data() length:bytes.size()];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(localIce) {
+  std::string ice = _bridge->localIce();
+  return [NSString stringWithUTF8String:ice.c_str()];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(beginLink) {
+  std::string code = _bridge->beginLink();
+  return [NSString stringWithUTF8String:code.c_str()];
+}
+
 RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(addContact:(id)prekeyBundle) {
   std::vector<uint8_t> bytes = bytesFromObject(prekeyBundle);
   std::string peerId = _bridge->addContact(bytes);
   return [NSString stringWithUTF8String:peerId.c_str()];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(addContactWithUsername:(id)prekeyBundle username:(NSString *)username) {
+  std::vector<uint8_t> bytes = bytesFromObject(prekeyBundle);
+  std::string name = username ? [username UTF8String] : "";
+  std::string peerId = _bridge->addContactWithUsername(bytes, name);
+  return [NSString stringWithUTF8String:peerId.c_str()];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(localUsername) {
+  std::string name = _bridge->localUsername();
+  return [NSString stringWithUTF8String:name.c_str()];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(localIdentityPublicKey) {
+  std::vector<uint8_t> key = _bridge->localIdentityPublicKey();
+  if (key.empty()) {
+    return [NSData data];
+  }
+  return [NSData dataWithBytes:key.data() length:key.size()];
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(signIdentity:(id)message) {
+  std::vector<uint8_t> bytes = bytesFromObject(message);
+  std::vector<uint8_t> sig = _bridge->signIdentity(bytes);
+  if (sig.empty()) {
+    return [NSData data];
+  }
+  return [NSData dataWithBytes:sig.data() length:sig.size()];
+}
+
+RCT_EXPORT_METHOD(connectPeer:(NSDictionary *)peerInfo) {
+  if (!peerInfo) {
+    return;
+  }
+  bridge::PeerInfo info;
+  NSString *peerId = [peerInfo objectForKey:@"peerId"];
+  NSString *address = [peerInfo objectForKey:@"address"];
+  NSNumber *port = [peerInfo objectForKey:@"port"];
+  NSString *iceBlob = [peerInfo objectForKey:@"iceBlob"];
+  if (peerId) {
+    info.peer_id = [peerId UTF8String];
+  }
+  if (address) {
+    info.address = [address UTF8String];
+  }
+  if (port) {
+    info.port = port.unsignedShortValue;
+  }
+  if (iceBlob) {
+    info.ice_blob = [iceBlob UTF8String];
+  }
+  _bridge->connectPeer(info);
 }
 
 RCT_EXPORT_METHOD(send:(NSString *)chatId payload:(id)payload) {
@@ -400,6 +483,12 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(getHistory:(NSString *)chatId cursor:(dou
 
 RCT_EXPORT_METHOD(linkDevice:(NSString *)linkCode) {
   _bridge->linkDevice([linkCode UTF8String]);
+}
+
+RCT_EXPORT_METHOD(updateProfile:(NSString *)username password:(NSString *)password) {
+  std::string name = username ? [username UTF8String] : "";
+  std::string pass = password ? [password UTF8String] : "";
+  _bridge->updateProfile(name, pass);
 }
 
 RCT_EXPORT_METHOD(addListener:(NSString *)eventName) {

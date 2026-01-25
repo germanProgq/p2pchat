@@ -31,7 +31,8 @@
 .AppleDouble
 .LSOverride
 ._*
-Icon
+Icon
+
 Thumbs.db
 ehthumbs.db
 Desktop.ini
@@ -67,10 +68,29 @@ android/.idea/
 android/local.properties
 android/**/build/
 android/*.iml
+/app/mobile/android/.gradle/
+/app/mobile/android/.cxx/
+/app/mobile/android/local.properties
+/app/mobile/android/**/build/
+/app/mobile/android/*.iml
 
 ios/Pods/
 ios/build/
 ios/*.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+/app/mobile/ios/Pods/
+/app/mobile/ios/build/
+/app/mobile/ios/*.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+
+/desktop/tauri/ui/dist/
+/desktop/tauri/src-tauri/target/
+
+/third_party/android/
+/third_party/jdk/
+/third_party/openssl/
+
+/tools/directory/data.json
+/tools/directory/data.json.tmp
+*.lock
 
 *.swp
 *.swo

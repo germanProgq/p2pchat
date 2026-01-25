@@ -259,7 +259,6 @@ transport::WebRtcConfig parseWebRtcConfig(JNIEnv* env, jobject webrtc_obj) {
 }
 
 bridge::NodeConfig parseBridgeConfig(JNIEnv* env, jobject config_obj) {
-  // Translate Java bridge config into native config.
   bridge::NodeConfig config;
   if (!config_obj) {
     return config;
@@ -267,12 +266,16 @@ bridge::NodeConfig parseBridgeConfig(JNIEnv* env, jobject config_obj) {
   jstring identity_path = static_cast<jstring>(getFieldObject(env, config_obj, "identityPath", "Ljava/lang/String;"));
   jstring storage_path = static_cast<jstring>(getFieldObject(env, config_obj, "storagePath", "Ljava/lang/String;"));
   jstring schema_path = static_cast<jstring>(getFieldObject(env, config_obj, "schemaPath", "Ljava/lang/String;"));
+  jstring username = static_cast<jstring>(getFieldObject(env, config_obj, "username", "Ljava/lang/String;"));
+  jstring password = static_cast<jstring>(getFieldObject(env, config_obj, "password", "Ljava/lang/String;"));
   jstring transport_kind = static_cast<jstring>(getFieldObject(env, config_obj, "transportKind", "Ljava/lang/String;"));
   jbyteArray master_key = static_cast<jbyteArray>(getFieldObject(env, config_obj, "masterKey", "[B"));
 
   config.identity_path = toString(env, identity_path);
   config.storage_path = toString(env, storage_path);
   config.schema_path = toString(env, schema_path);
+  config.username = toString(env, username);
+  config.password = toString(env, password);
   config.master_key = toBytes(env, master_key);
 
   std::string kind = toString(env, transport_kind);
@@ -307,6 +310,12 @@ bridge::NodeConfig parseBridgeConfig(JNIEnv* env, jobject config_obj) {
   }
   if (schema_path) {
     env->DeleteLocalRef(schema_path);
+  }
+  if (username) {
+    env->DeleteLocalRef(username);
+  }
+  if (password) {
+    env->DeleteLocalRef(password);
   }
   if (transport_kind) {
     env->DeleteLocalRef(transport_kind);
@@ -422,6 +431,98 @@ extern "C" JNIEXPORT void JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeSta
   instance->bridge->start(config);
 }
 
+extern "C" JNIEXPORT jbyteArray JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeLocalBundle(JNIEnv* env,
+                                                                                             jclass,
+                                                                                             jlong handle) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewByteArray(0);
+  }
+  std::vector<uint8_t> bundle = instance->bridge->localBundle();
+  jbyteArray out = env->NewByteArray(static_cast<jsize>(bundle.size()));
+  if (!out) {
+    return env->NewByteArray(0);
+  }
+  if (!bundle.empty()) {
+    env->SetByteArrayRegion(out, 0, static_cast<jsize>(bundle.size()),
+                            reinterpret_cast<const jbyte*>(bundle.data()));
+  }
+  return out;
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeLocalIce(JNIEnv* env,
+                                                                                       jclass,
+                                                                                       jlong handle) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewStringUTF("");
+  }
+  std::string ice = instance->bridge->localIce();
+  return env->NewStringUTF(ice.c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeBeginLink(JNIEnv* env,
+                                                                                         jclass,
+                                                                                         jlong handle) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewStringUTF("");
+  }
+  std::string code = instance->bridge->beginLink();
+  return env->NewStringUTF(code.c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeLocalUsername(JNIEnv* env,
+                                                                                             jclass,
+                                                                                             jlong handle) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewStringUTF("");
+  }
+  std::string name = instance->bridge->localUsername();
+  return env->NewStringUTF(name.c_str());
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeLocalIdentityPublicKey(JNIEnv* env,
+                                                                                                         jclass,
+                                                                                                         jlong handle) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewByteArray(0);
+  }
+  std::vector<uint8_t> key = instance->bridge->localIdentityPublicKey();
+  jbyteArray out = env->NewByteArray(static_cast<jsize>(key.size()));
+  if (!out) {
+    return env->NewByteArray(0);
+  }
+  if (!key.empty()) {
+    env->SetByteArrayRegion(out, 0, static_cast<jsize>(key.size()),
+                            reinterpret_cast<const jbyte*>(key.data()));
+  }
+  return out;
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeSignIdentity(JNIEnv* env,
+                                                                                                jclass,
+                                                                                                jlong handle,
+                                                                                                jbyteArray message) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewByteArray(0);
+  }
+  std::vector<uint8_t> bytes = toBytes(env, message);
+  std::vector<uint8_t> sig = instance->bridge->signIdentity(bytes);
+  jbyteArray out = env->NewByteArray(static_cast<jsize>(sig.size()));
+  if (!out) {
+    return env->NewByteArray(0);
+  }
+  if (!sig.empty()) {
+    env->SetByteArrayRegion(out, 0, static_cast<jsize>(sig.size()),
+                            reinterpret_cast<const jbyte*>(sig.data()));
+  }
+  return out;
+}
+
 extern "C" JNIEXPORT jstring JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeAddContact(JNIEnv* env,
                                                                                           jclass,
                                                                                           jlong handle,
@@ -432,6 +533,21 @@ extern "C" JNIEXPORT jstring JNICALL Java_com_p2pchat_bridge_BridgeModule_native
   }
   std::vector<uint8_t> bytes = toBytes(env, bundle);
   std::string peer_id = instance->bridge->addContact(bytes);
+  return env->NewStringUTF(peer_id.c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeAddContactWithUsername(JNIEnv* env,
+                                                                                                      jclass,
+                                                                                                      jlong handle,
+                                                                                                      jbyteArray bundle,
+                                                                                                      jstring username) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return env->NewStringUTF("");
+  }
+  std::vector<uint8_t> bytes = toBytes(env, bundle);
+  std::string name = toString(env, username);
+  std::string peer_id = instance->bridge->addContactWithUsername(bytes, name);
   return env->NewStringUTF(peer_id.c_str());
 }
 
@@ -481,4 +597,37 @@ extern "C" JNIEXPORT void JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeLin
   }
   std::string code = toString(env, link_code);
   instance->bridge->linkDevice(code);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeUpdateProfile(JNIEnv* env,
+                                                                                           jclass,
+                                                                                           jlong handle,
+                                                                                           jstring username,
+                                                                                           jstring password) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return;
+  }
+  std::string name = toString(env, username);
+  std::string pass = toString(env, password);
+  instance->bridge->updateProfile(name, pass);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_com_p2pchat_bridge_BridgeModule_nativeConnectPeer(JNIEnv* env,
+                                                                                        jclass,
+                                                                                        jlong handle,
+                                                                                        jstring peer_id,
+                                                                                        jstring address,
+                                                                                        jint port,
+                                                                                        jstring ice_blob) {
+  auto* instance = fromHandle(handle);
+  if (!instance) {
+    return;
+  }
+  bridge::PeerInfo info;
+  info.peer_id = toString(env, peer_id);
+  info.address = toString(env, address);
+  info.port = static_cast<uint16_t>(port);
+  info.ice_blob = toString(env, ice_blob);
+  instance->bridge->connectPeer(info);
 }

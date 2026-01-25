@@ -57,6 +57,8 @@ void testEndToEndReconnectResync() {
   configA.identity_path = (dirA / "identity.bin").string();
   configA.storage_path = (dirA / "store.db").string();
   configA.schema_path = (std::filesystem::path(P2PCHAT_SOURCE_DIR) / "core/storage/schema.sql").string();
+  configA.username = "e2e-a";
+  configA.password = "password123";
   configA.master_key = std::make_shared<identity::InMemoryKeyStore>(fixedKey());
   configA.transport_kind = core::TransportKind::Loopback;
   configA.loopback_network = &network;

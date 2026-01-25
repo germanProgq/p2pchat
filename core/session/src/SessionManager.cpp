@@ -648,7 +648,8 @@ void SessionManager::sendMessage(const transport::PeerId& peer,
                                                 config_.frame_aead,
                                                 config_.max_padding);
 
-  if (content_type != static_cast<uint8_t>(ContentType::DeviceRevocation)) {
+  if (content_type != static_cast<uint8_t>(ContentType::DeviceRevocation) &&
+      content_type != static_cast<uint8_t>(ContentType::SettingsUpdate)) {
     std::vector<uint8_t> stored_payload = encodeStoredPayload(content_type, plaintext, ratchet_bytes);
     config_.storage->appendMessage(chat_id,
                                    message.msg_id,
@@ -808,6 +809,10 @@ void SessionManager::handleReceive(const transport::PeerId& peer, transport::Fra
           config_.storage->storeRevocation(record);
           if (onDeviceRevoked) {
             onDeviceRevoked(device_id);
+          }
+        } else if (incoming.content_type == static_cast<uint8_t>(ContentType::SettingsUpdate)) {
+          if (onSettingsUpdate) {
+            onSettingsUpdate(peer, plaintext);
           }
         } else {
           std::vector<uint8_t> stored_payload = encodeStoredPayload(incoming.content_type, plaintext, ratchet_bytes);

@@ -11,6 +11,8 @@ Boots the core and opens storage. Required fields:
 - schemaPath (string): filesystem path to schema.sql.
 
 Optional fields:
+- username (string): global username for this identity.
+- password (string): app unlock password (local).
 - masterKey (Uint8Array, 32 bytes): overrides OS keystore for tests.
 - transportKind (string): "quic" | "webrtc" | "loopback".
 - transport (object): { maxInFlight, maxQueueBytes, retry }.
@@ -26,9 +28,24 @@ Optional fields:
 - handshakeMaxDelayMs (number).
 - handshakeMaxAttempts (number).
 
+### localBundle()
+Returns the serialized local prekey bundle as Uint8Array.
+
+### localIce()
+Returns the local ICE description string, or empty if not available.
+
+### beginLink()
+Returns a link code string for device linking.
+
 ### addContact(prekeyBundle)
 Adds a contact and starts the handshake.
 - prekeyBundle (Uint8Array): serialized prekey bundle.
+- Returns: peerId (string).
+
+### addContactWithUsername(prekeyBundle, username)
+Adds a contact with a username and starts the handshake.
+- prekeyBundle (Uint8Array): serialized prekey bundle.
+- username (string): peer username.
 - Returns: peerId (string).
 
 Prekey bundle encoding (little-endian integers):
@@ -45,6 +62,11 @@ Prekey bundle encoding (little-endian integers):
   - oneTimePrekeyId (u32)
   - oneTimePrekeyPublic (32 bytes)
 
+### connectPeer(peerInfo)
+Connects to a peer transport endpoint.
+- peerInfo (object): { peerId, address, port, iceBlob }.
+- address/port may be omitted if iceBlob is provided.
+
 ### send(chatId, payload)
 Sends a message to a chat.
 - chatId (string).
@@ -55,10 +77,24 @@ Returns message history.
 - chatId (string).
 - cursor (number): start index (inclusive).
 - limit (number).
-- Returns: array of history messages.
+- Returns: array of history messages (includes peerUsername).
 
 ### linkDevice(linkCode)
 Links a device using a link code string.
+
+### localUsername()
+Returns the local username string.
+
+### localIdentityPublicKey()
+Returns the local identity Ed25519 public key as Uint8Array (32 bytes).
+
+### signIdentity(message)
+Signs an arbitrary message with the local identity Ed25519 key.
+- message (Uint8Array).
+- Returns: signature (Uint8Array, 64 bytes).
+
+### updateProfile(username, password)
+Updates the local username and/or password, and propagates to linked devices.
 
 ## Events
 
@@ -67,6 +103,7 @@ Payload:
 - chatId (string)
 - msgId (string)
 - senderDevice (string)
+- peerUsername (string)
 - tsMs (number)
 - contentType (string): "text" | "binary"
 - body (Uint8Array)
@@ -74,14 +111,17 @@ Payload:
 ### onConnectionChange
 Payload:
 - peerId (string)
+- peerUsername (string)
 - state (string): "disconnected" | "connecting" | "connected"
 
 ### onPeerStatus
 Payload:
 - peerId (string)
+- peerUsername (string)
 - status (string): "pending" | "ready" | "failed"
 
 ### onError
 Payload:
 - peerId (string)
+- peerUsername (string)
 - message (string)

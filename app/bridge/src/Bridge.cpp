@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -31,12 +32,32 @@ void CoreAdapter::stop() {
   core_->stop();
 }
 
+std::vector<uint8_t> CoreAdapter::localBundle() const {
+  return crypto::serializePreKeyBundle(core_->localPreKeyBundle());
+}
+
+std::string CoreAdapter::localIce() const {
+  return core_->localIceDescription();
+}
+
+std::string CoreAdapter::beginLink() const {
+  return core_->beginLink();
+}
+
 void CoreAdapter::tick(int64_t now_ms) {
   core_->tick(now_ms);
 }
 
 std::string CoreAdapter::addContact(const crypto::PreKeyBundle& bundle) {
   return core_->addContact(bundle);
+}
+
+std::string CoreAdapter::addContactWithUsername(const crypto::PreKeyBundle& bundle, const std::string& username) {
+  return core_->addContact(bundle, username);
+}
+
+void CoreAdapter::connectPeer(const transport::PeerInfo& info) {
+  core_->connectPeer(info);
 }
 
 void CoreAdapter::send(const std::string& chat_id,
@@ -53,6 +74,27 @@ std::vector<session::HistoryMessage> CoreAdapter::getHistory(const std::string& 
 
 void CoreAdapter::linkDevice(const std::string& link_code) {
   core_->linkDevice(link_code);
+}
+
+std::optional<std::string> CoreAdapter::lookupUsername(const std::string& peer_id) const {
+  return core_->contactUsername(peer_id);
+}
+
+std::string CoreAdapter::localUsername() const {
+  return core_->localUsername();
+}
+
+std::vector<uint8_t> CoreAdapter::localIdentityPublicKey() const {
+  std::array<uint8_t, 32> key = core_->localIdentityPublicKey();
+  return std::vector<uint8_t>(key.begin(), key.end());
+}
+
+std::vector<uint8_t> CoreAdapter::signIdentity(const std::vector<uint8_t>& message) const {
+  return core_->signIdentity(message);
+}
+
+void CoreAdapter::updateProfile(const std::string& username, const std::string& password) {
+  core_->updateProfile(username, password);
 }
 
 void CoreAdapter::bindCallbacks() {
@@ -89,9 +131,35 @@ void Bridge::start(const NodeConfig& config) {
   backend_->start(toCoreConfig(config));
 }
 
+std::vector<uint8_t> Bridge::localBundle() const {
+  return backend_->localBundle();
+}
+
+std::string Bridge::localIce() const {
+  return backend_->localIce();
+}
+
+std::string Bridge::beginLink() const {
+  return backend_->beginLink();
+}
+
 std::string Bridge::addContact(const std::vector<uint8_t>& prekey_bundle) {
   crypto::PreKeyBundle bundle = crypto::parsePreKeyBundle(prekey_bundle);
   return backend_->addContact(bundle);
+}
+
+std::string Bridge::addContactWithUsername(const std::vector<uint8_t>& prekey_bundle, const std::string& username) {
+  crypto::PreKeyBundle bundle = crypto::parsePreKeyBundle(prekey_bundle);
+  return backend_->addContactWithUsername(bundle, username);
+}
+
+void Bridge::connectPeer(const PeerInfo& info) {
+  transport::PeerInfo peer;
+  peer.id = info.peer_id;
+  peer.address = info.address;
+  peer.port = info.port;
+  peer.ice_blob = info.ice_blob;
+  backend_->connectPeer(peer);
 }
 
 void Bridge::send(const std::string& chat_id, const std::string& text) {
@@ -109,11 +177,13 @@ std::vector<HistoryMessage> Bridge::getHistory(const std::string& chat_id,
   std::vector<session::HistoryMessage> history = backend_->getHistory(chat_id, start_index, limit);
   std::vector<HistoryMessage> out;
   out.reserve(history.size());
+  std::optional<std::string> peer_username = backend_->lookupUsername(chat_id);
   for (const auto& msg : history) {
     HistoryMessage converted;
     converted.chat_id = msg.chat_id;
     converted.msg_id = msg.msg_id;
     converted.sender_device = msg.sender_device;
+    converted.peer_username = peer_username.value_or("");
     converted.ts_ms = msg.ts_ms;
     converted.content_type = toBridgeContentType(msg.content_type);
     converted.body = msg.body;
@@ -129,6 +199,22 @@ void Bridge::linkDevice(const std::string& link_code) {
   backend_->linkDevice(link_code);
 }
 
+std::string Bridge::localUsername() const {
+  return backend_->localUsername();
+}
+
+std::vector<uint8_t> Bridge::localIdentityPublicKey() const {
+  return backend_->localIdentityPublicKey();
+}
+
+std::vector<uint8_t> Bridge::signIdentity(const std::vector<uint8_t>& message) const {
+  return backend_->signIdentity(message);
+}
+
+void Bridge::updateProfile(const std::string& username, const std::string& password) {
+  backend_->updateProfile(username, password);
+}
+
 void Bridge::bindBackend() {
   backend_->onMessage = [this](const session::IncomingMessage& msg) {
     if (!onMessage) {
@@ -138,6 +224,7 @@ void Bridge::bindBackend() {
     out.chat_id = msg.chat_id;
     out.msg_id = msg.msg_id;
     out.sender_device = msg.sender_device;
+    out.peer_username = backend_->lookupUsername(msg.chat_id).value_or("");
     out.ts_ms = msg.ts_ms;
     out.content_type = toBridgeContentType(msg.content_type);
     out.body = msg.body;
@@ -149,6 +236,7 @@ void Bridge::bindBackend() {
     }
     ConnectionEvent event;
     event.peer_id = peer;
+    event.peer_username = backend_->lookupUsername(peer).value_or("");
     event.state = toBridgeState(state);
     onConnectionChange(event);
   };
@@ -158,6 +246,7 @@ void Bridge::bindBackend() {
     }
     PeerStatusEvent event;
     event.peer_id = peer;
+    event.peer_username = backend_->lookupUsername(peer).value_or("");
     event.status = toBridgeStatus(status);
     onPeerStatus(event);
   };
@@ -167,6 +256,7 @@ void Bridge::bindBackend() {
     }
     ErrorEvent event;
     event.peer_id = peer;
+    event.peer_username = backend_->lookupUsername(peer).value_or("");
     event.message = message;
     onError(event);
   };
@@ -177,6 +267,8 @@ core::NodeConfig Bridge::toCoreConfig(const NodeConfig& config) const {
   out.identity_path = config.identity_path;
   out.storage_path = config.storage_path;
   out.schema_path = config.schema_path;
+  out.username = config.username;
+  out.password = config.password;
   if (!config.master_key.empty()) {
     if (config.master_key.size() != 32) {
       throw std::runtime_error("master key length must be 32 bytes");

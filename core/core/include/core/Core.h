@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +34,8 @@ struct NodeConfig {
   std::string identity_path;
   std::string storage_path;
   std::string schema_path;
+  std::string username;
+  std::string password;
   std::shared_ptr<identity::MasterKeyProvider> master_key;
   TransportKind transport_kind = TransportKind::Quic;
   transport::TransportConfig transport{};
@@ -57,11 +60,15 @@ class Core {
   void tick(int64_t now_ms);
 
   std::string localUserId() const;
+  std::string localUsername() const;
+  std::array<uint8_t, 32> localIdentityPublicKey() const;
+  std::vector<uint8_t> signIdentity(const std::vector<uint8_t>& message) const;
   crypto::PreKeyBundle localPreKeyBundle() const;
   std::string localIceDescription() const;
   std::string beginLink() const;
 
   std::string addContact(const crypto::PreKeyBundle& bundle);
+  std::string addContact(const crypto::PreKeyBundle& bundle, const std::string& username);
   void connectPeer(const transport::PeerInfo& info);
   void send(const std::string& chat_id,
             const std::vector<uint8_t>& plaintext,
@@ -71,6 +78,8 @@ class Core {
                                                   size_t limit) const;
   void linkDevice(const std::string& link_code);
   void revokeDevice(const std::string& device_id);
+  void updateProfile(const std::string& username, const std::string& password);
+  std::optional<std::string> contactUsername(const std::string& peer_id) const;
 
   std::function<void(const session::IncomingMessage&)> onMessage;
   std::function<void(const transport::PeerId&, transport::ConnectionState)> onConnectionChange;
@@ -106,6 +115,7 @@ class Core {
                                  transport::SendFailure reason);
   void handleTransportConnection(const transport::PeerId& peer, transport::ConnectionState state);
   void handleTransportWritable(const transport::PeerId& peer, bool writable);
+  void handleSettingsUpdate(const transport::PeerId& peer, const std::vector<uint8_t>& payload);
 
   void handleHandshakeInit(const transport::PeerId& peer, const std::vector<uint8_t>& payload);
   void handleHandshakeAck(const transport::PeerId& peer, const std::vector<uint8_t>& payload);
