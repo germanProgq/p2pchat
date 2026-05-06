@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(ANDROID AND NOT OPENSSL_ROOT_DIR)
+  message(FATAL_ERROR "Android OpenSSL is required. Set P2PCHAT_ANDROID_OPENSSL_ROOT or -Pp2pchatAndroidOpenSslRoot to a cross-compiled OpenSSL install for the active Android ABI.")
+endif()
+
 find_package(OpenSSL REQUIRED)
 
 add_library(p2pchat_bridge SHARED

@@ -4,6 +4,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if ! command -v cmake >/dev/null 2>&1 && [ -x /opt/homebrew/opt/cmake/bin/cmake ]; then
+  export PATH="/opt/homebrew/opt/cmake/bin:$PATH"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required" >&2
   exit 1
@@ -35,5 +39,5 @@ docker compose -f "$ROOT/docker-compose.yml" up -d --build
 cmake -S "$ROOT" -B "$ROOT/build"
 cmake --build "$ROOT/build"
 
-cd "$ROOT/desktop/tauri/src-tauri"
-PATH="$HOME/.cargo/bin:$PATH" P2PCHAT_FFI_PATH="$LIB_PATH" cargo tauri dev
+cd "$ROOT/desktop/tauri"
+PATH="$HOME/.cargo/bin:$PATH" P2PCHAT_FFI_PATH="$LIB_PATH" npm run dev

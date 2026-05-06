@@ -85,7 +85,7 @@ const DEFAULT_CONFIG: UiConfig = {
   bindPort: 0,
   maxDatagramSize: 1200,
   maxInFlight: 32,
-  maxQueueBytes: 1 << 20,
+  maxQueueBytes: 1048576,
   retryBaseDelayMs: 100,
   retryMaxDelayMs: 2000,
   retryMaxAttempts: 5,
@@ -101,14 +101,14 @@ const DEFAULT_CONFIG: UiConfig = {
 
 const COLORS = {
   ink: '#151b22',
-  muted: '#616772',
-  accent: '#d46b2c',
-  accentAlt: '#2f8f83',
-  bg: '#f6f1ea',
+  muted: '#667085',
+  accent: '#3f63ff',
+  accentAlt: '#0c9b77',
+  bg: '#f7f8fb',
   panel: '#ffffff',
-  panelAlt: '#f2ece4',
-  line: '#e2ddd5',
-  danger: '#c9603b'
+  panelAlt: '#eef3f4',
+  line: '#dfe5ea',
+  danger: '#d94a4a'
 };
 
 const FONT_BASE = Platform.select({ios: 'Avenir Next', android: 'sans-serif-condensed'}) || 'System';
@@ -233,6 +233,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
 
   const messageListRef = useRef<FlatList<Message> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {width} = useWindowDimensions();
   const isWide = width >= 960;
 
@@ -252,7 +253,9 @@ export default function App() {
     return Object.values(chats).sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
   }, [chats]);
 
-  const activeMessages = selectedChat ? messages[selectedChat] || [] : [];
+  const activeMessages = useMemo(() => {
+    return selectedChat ? messages[selectedChat] || [] : [];
+  }, [messages, selectedChat]);
 
   const incomingInvites = useMemo(() => {
     return invites.filter((invite) => invite.toUsername === effectiveUsername && invite.status === 'pending');
@@ -263,8 +266,22 @@ export default function App() {
   }, [effectiveUsername, invites]);
 
   const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToast(message);
-    setTimeout(() => setToast(null), 3500);
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
   }, []);
 
   const ensureCoreFiles = useCallback(async () => {
@@ -534,13 +551,13 @@ export default function App() {
       return;
     }
     try {
-      const bundleHex = bytesToHex(Bridge.localBundle());
+      const outgoingBundleHex = bytesToHex(Bridge.localBundle());
       const ice = Bridge.localIce();
       const timestampMs = Date.now();
       const message = buildInviteMessage({
         fromUsername: effectiveUsername,
         toUsername,
-        fromBundleHex: bundleHex,
+        fromBundleHex: outgoingBundleHex,
         fromIce: ice,
         timestampMs
       });
@@ -548,7 +565,7 @@ export default function App() {
       const invite = await sendInvite({
         fromUsername: effectiveUsername,
         toUsername,
-        fromBundleHex: bundleHex,
+        fromBundleHex: outgoingBundleHex,
         fromIce: ice,
         signatureHex,
         timestampMs
@@ -565,13 +582,13 @@ export default function App() {
       return;
     }
     try {
-      const bundleHex = bytesToHex(Bridge.localBundle());
+      const acceptedBundleHex = bytesToHex(Bridge.localBundle());
       const ice = Bridge.localIce();
       const timestampMs = Date.now();
       const message = buildInviteAcceptMessage({
         inviteId: invite.id,
         username: effectiveUsername,
-        bundleHex,
+        bundleHex: acceptedBundleHex,
         ice,
         timestampMs
       });
@@ -579,7 +596,7 @@ export default function App() {
       const updated = await acceptInvite({
         inviteId: invite.id,
         username: effectiveUsername,
-        bundleHex,
+        bundleHex: acceptedBundleHex,
         ice,
         signatureHex,
         timestampMs
@@ -1043,7 +1060,11 @@ export default function App() {
           editable={!!selectedChat}
           style={[styles.input, styles.composerInput]}
         />
-        <Pressable style={[styles.primaryButton, !composer.trim() && styles.buttonDisabled]} onPress={handleSend}>
+        <Pressable
+          disabled={!selectedChat || !composer.trim()}
+          style={[styles.primaryButton, (!selectedChat || !composer.trim()) && styles.buttonDisabled]}
+          onPress={handleSend}
+        >
           <Text style={styles.primaryButtonText}>Send</Text>
         </Pressable>
       </View>
@@ -1398,6 +1419,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.panel,
     borderWidth: 1,
     borderColor: COLORS.line,
+    borderRadius: 8,
     gap: 12
   },
   authTitle: {
@@ -1436,7 +1458,8 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: COLORS.panel,
     borderWidth: 1,
-    borderColor: COLORS.line
+    borderColor: COLORS.line,
+    borderRadius: 8
   },
   brandTitle: {
     fontSize: 20,
@@ -1479,13 +1502,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: FONT_BASE,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0,
     color: COLORS.muted
   },
   sectionTitle: {
     fontSize: 12,
     fontFamily: FONT_BASE,
-    letterSpacing: 2,
+    letterSpacing: 0,
     textTransform: 'uppercase',
     color: COLORS.muted
   },
@@ -1502,6 +1525,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.line,
     backgroundColor: COLORS.panel,
+    borderRadius: 8,
     marginBottom: 8
   },
   chatItemActive: {
@@ -1533,7 +1557,7 @@ const styles = StyleSheet.create({
   chatStatus: {
     fontSize: 10,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0,
     color: COLORS.muted
   },
   chatStatusActive: {
@@ -1561,7 +1585,8 @@ const styles = StyleSheet.create({
     padding: 10,
     fontSize: 13,
     fontFamily: FONT_BASE,
-    color: COLORS.ink
+    color: COLORS.ink,
+    borderRadius: 8
   },
   inputMulti: {
     borderWidth: 1,
@@ -1572,7 +1597,8 @@ const styles = StyleSheet.create({
     fontFamily: FONT_BASE,
     color: COLORS.ink,
     minHeight: 90,
-    textAlignVertical: 'top'
+    textAlignVertical: 'top',
+    borderRadius: 8
   },
   row: {
     flexDirection: 'row',
@@ -1586,41 +1612,44 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     backgroundColor: COLORS.accent,
-    alignItems: 'center'
+    alignItems: 'center',
+    borderRadius: 8
   },
   primaryButtonText: {
     color: '#fff',
     fontFamily: FONT_BASE,
     fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: 1
+    letterSpacing: 0
   },
   secondaryButton: {
     paddingVertical: 10,
     paddingHorizontal: 14,
     backgroundColor: COLORS.accentAlt,
-    alignItems: 'center'
+    alignItems: 'center',
+    borderRadius: 8
   },
   secondaryButtonText: {
     color: '#fff',
     fontFamily: FONT_BASE,
     fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: 1
+    letterSpacing: 0
   },
   ghostButton: {
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: COLORS.line,
-    alignItems: 'center'
+    alignItems: 'center',
+    borderRadius: 8
   },
   ghostButtonText: {
     color: COLORS.muted,
     fontFamily: FONT_BASE,
     fontSize: 12,
     textTransform: 'uppercase',
-    letterSpacing: 1
+    letterSpacing: 0
   },
   buttonDisabled: {
     opacity: 0.6
@@ -1679,15 +1708,16 @@ const styles = StyleSheet.create({
   messageBubble: {
     maxWidth: '70%',
     padding: 12,
-    borderWidth: 1
+    borderWidth: 1,
+    borderRadius: 8
   },
   messageBubbleOut: {
-    backgroundColor: '#fdf4ed',
-    borderColor: '#f1c4a5'
+    backgroundColor: '#edf2ff',
+    borderColor: 'rgba(63, 99, 255, 0.24)'
   },
   messageBubbleIn: {
-    backgroundColor: '#f3ebe2',
-    borderColor: '#e5ded6'
+    backgroundColor: '#f4f7fb',
+    borderColor: '#e2e8f0'
   },
   messageText: {
     fontSize: 14,
@@ -1766,6 +1796,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.line,
     backgroundColor: COLORS.panel,
     padding: 12,
+    borderRadius: 8,
     gap: 6
   },
   inviteTitle: {
@@ -1776,7 +1807,7 @@ const styles = StyleSheet.create({
   inviteSubtitle: {
     fontSize: 11,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0,
     color: COLORS.muted
   },
   inviteActions: {
@@ -1792,7 +1823,8 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: COLORS.panel,
     borderWidth: 1,
-    borderColor: COLORS.line
+    borderColor: COLORS.line,
+    borderRadius: 8
   },
   toastText: {
     fontSize: 12,

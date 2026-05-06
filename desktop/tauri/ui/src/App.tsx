@@ -6,6 +6,7 @@ import {
   connectPeer,
   getHistory,
   identityPublicKeyHex,
+  isTauriAvailable,
   linkDevice,
   localBundle,
   localIce,
@@ -195,8 +196,11 @@ export default function App() {
       .sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
   }, [chats]);
 
-  const activeMessages = selectedChat ? messages[selectedChat] || [] : [];
+  const activeMessages = useMemo(() => {
+    return selectedChat ? messages[selectedChat] || [] : [];
+  }, [messages, selectedChat]);
   const selectedMeta = selectedChat ? chats[selectedChat] : undefined;
+  const runtimeLabel = isTauriAvailable() ? 'Desktop core' : 'Browser core';
 
   const incomingInvites = useMemo(() => {
     return invites.filter((invite) => invite.toUsername === effectiveUsername && invite.status === 'pending');
@@ -696,8 +700,11 @@ export default function App() {
       <div className="auth-screen">
         <div className="auth-card">
           <div className="auth-header">
-            <h1>p2pchat</h1>
-            <p>Unlock your identity</p>
+            <div>
+              <h1>p2pchat</h1>
+              <p>Unlock your identity</p>
+            </div>
+            <span className="runtime-pill">{runtimeLabel}</span>
           </div>
           <label>
             Username
@@ -735,13 +742,16 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        {/* <header className="brand">
+        <header className="brand">
           <div>
             <h1>p2pchat</h1>
             <p>{ready ? `Signed in as ${localUsername}` : 'Starting core...'}</p>
           </div>
-          <div className={`signal ${ready ? 'on' : 'off'}`} />
-        </header> */}
+          <div className="brand-status">
+            <span className="runtime-pill compact">{runtimeLabel}</span>
+            <div className={`signal ${ready ? 'on' : 'off'}`} />
+          </div>
+        </header>
         <section className="section">
           <div className="section-title">Chats</div>
           <div className="chat-list">
@@ -776,7 +786,7 @@ export default function App() {
         <section className="chat-header">
           <div>
             <h2>{selectedChat ? (selectedMeta?.username || `Chat ${selectedChat}`) : 'Select a chat'}</h2>
-            <p>Secure, direct, end-to-end</p>
+            <p>{runtimeLabel}</p>
           </div>
           <div className="header-actions">
             <button className="ghost" onClick={() => setMenuOpen(true)}>Menu</button>

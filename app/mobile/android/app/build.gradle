@@ -57,7 +57,11 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = (findProperty("android.enableProguardInReleaseBuilds") ?: "true").toBoolean()
+def releaseStoreFile = findProperty("P2PCHAT_RELEASE_STORE_FILE") ?: System.getenv("P2PCHAT_RELEASE_STORE_FILE")
+def releaseStorePassword = findProperty("P2PCHAT_RELEASE_STORE_PASSWORD") ?: System.getenv("P2PCHAT_RELEASE_STORE_PASSWORD")
+def releaseKeyAlias = findProperty("P2PCHAT_RELEASE_KEY_ALIAS") ?: System.getenv("P2PCHAT_RELEASE_KEY_ALIAS")
+def releaseKeyPassword = findProperty("P2PCHAT_RELEASE_KEY_PASSWORD") ?: System.getenv("P2PCHAT_RELEASE_KEY_PASSWORD")
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -84,6 +88,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        manifestPlaceholders = [usesCleartextTraffic: "false"]
     }
     signingConfigs {
         debug {
@@ -92,16 +97,27 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (releaseStoreFile) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            manifestPlaceholders = [usesCleartextTraffic: "true"]
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (releaseStoreFile) {
+                signingConfig signingConfigs.release
+            }
+            manifestPlaceholders = [usesCleartextTraffic: "false"]
             minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }

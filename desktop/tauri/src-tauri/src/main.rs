@@ -246,6 +246,7 @@ fn resolve_ffi_path(app: &AppHandle) -> Result<String, String> {
   candidates.push(repo_root.join("build").join(lib_name));
   if let Some(resource_dir) = app.path_resolver().resource_dir() {
     candidates.push(resource_dir.join(lib_name));
+    candidates.push(resource_dir.join("resources").join(lib_name));
   }
   if let Ok(exe) = std::env::current_exe() {
     if let Some(dir) = exe.parent() {

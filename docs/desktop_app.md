@@ -27,6 +27,13 @@ Storage and Paths
 Packaging
 - Tauri bundles the UI and includes the p2pchat_ffi library and schema.sql asset.
 - CMake builds p2pchat_ffi for desktop targets; Tauri loads it in-process.
+- From desktop/tauri, `npm run build:debug` builds a local debug bundle and `npm run build` builds the release bundle.
+- The Tauri build runs scripts/prepare_tauri_resources.sh to compile the FFI library, copy resources, and build the browser UI.
+
+Browser Build
+- The React UI also runs in a normal browser through the browser fallback bridge in ui/src/api.ts.
+- Browser mode stores identity, contacts, and message history in localStorage and exchanges same-origin test messages through BroadcastChannel.
+- Browser mode is suitable for hosted demos and web smoke testing; native P2P transport still requires the desktop/mobile bridge.
 
 Manual Test
 1) Build and launch two desktop instances with distinct data directories and ports.

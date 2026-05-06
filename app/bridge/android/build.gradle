@@ -4,9 +4,14 @@ def safeExtGet(prop, fallback) {
   return rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
 }
 
+def androidOpenSslRoot = rootProject.hasProperty('p2pchatAndroidOpenSslRoot')
+  ? rootProject.property('p2pchatAndroidOpenSslRoot')
+  : System.getenv('P2PCHAT_ANDROID_OPENSSL_ROOT')
+
 android {
   namespace 'com.p2pchat.bridge'
   compileSdkVersion safeExtGet('compileSdkVersion', 34)
+  ndkVersion safeExtGet('ndkVersion', '27.1.12297006')
 
   defaultConfig {
     minSdkVersion safeExtGet('minSdkVersion', 23)
@@ -15,6 +20,9 @@ android {
       cmake {
         cppFlags '-std=c++17 -fexceptions -frtti'
         arguments '-DANDROID_STL=c++_shared'
+        if (androidOpenSslRoot) {
+          arguments "-DOPENSSL_ROOT_DIR=${androidOpenSslRoot}"
+        }
       }
     }
   }

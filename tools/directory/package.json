@@ -5,6 +5,7 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
+    "check": "node --check server.js",
     "start": "node server.js"
   },
   "dependencies": {

@@ -435,7 +435,7 @@ add_test(NAME desktop_package_smoke
 set_tests_properties(desktop_package_smoke PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 add_custom_target(check_phase0
-  COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_phase0.sh
+  COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_init.sh
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

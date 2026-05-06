@@ -3,5 +3,9 @@
   "version": "0.1.0",
   "main": "js/index.ts",
   "react-native": "js/index.ts",
+  "types": "js/index.ts",
+  "peerDependencies": {
+    "react-native": "*"
+  },
   "private": true
 }

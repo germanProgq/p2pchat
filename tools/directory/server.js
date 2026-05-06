@@ -10,6 +10,11 @@ const nacl = require('tweetnacl');
 const PORT = Number(process.env.PORT || 8787);
 const DATA_PATH = process.env.P2PCHAT_DIRECTORY_DATA || path.join(__dirname, 'data.json');
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const INVITE_TIMESTAMP_SKEW_MS = Number(process.env.P2PCHAT_INVITE_TIMESTAMP_SKEW_MS || 10 * 60 * 1000);
+const ALLOWED_ORIGINS = (process.env.P2PCHAT_DIRECTORY_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 const USERNAME_RE = /^[A-Za-z0-9._-]{3,32}$/;
 
@@ -34,6 +39,7 @@ function loadStore(filePath) {
 const store = loadStore(DATA_PATH);
 
 function saveStore() {
+  fs.mkdirSync(path.dirname(DATA_PATH), {recursive: true});
   const tmpPath = `${DATA_PATH}.tmp`;
   const payload = JSON.stringify(store, null, 2);
   fs.writeFileSync(tmpPath, payload, 'utf8');
@@ -85,6 +91,15 @@ function ensureHexBytesAtLeast(hex, minLength, name) {
   return bytes;
 }
 
+function validateTimestamp(timestampMs) {
+  if (!Number.isFinite(timestampMs)) {
+    throw new Error('timestampMs required');
+  }
+  if (Math.abs(nowMs() - timestampMs) > INVITE_TIMESTAMP_SKEW_MS) {
+    throw new Error('timestampMs outside allowed clock skew');
+  }
+}
+
 function verifySignature(message, signatureHex, publicKeyHex) {
   const sig = ensureHexBytes(signatureHex, 64, 'signature');
   const pub = ensureHexBytes(publicKeyHex, 32, 'identityKey');
@@ -106,7 +121,22 @@ function pruneChallenges() {
 }
 
 const app = express();
-app.use(cors());
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || ALLOWED_ORIGINS.length === 0 || ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('origin not allowed'));
+  }
+}));
 app.use(express.json({limit: '2mb'}));
 
 app.get('/health', (_req, res) => {
@@ -194,9 +224,7 @@ app.post('/v1/invites', (req, res) => {
     const timestampMs = Number(req.body.timestampMs);
 
     ensureHexBytesAtLeast(fromBundleHex, 1, 'fromBundle');
-    if (!Number.isFinite(timestampMs)) {
-      throw new Error('timestampMs required');
-    }
+    validateTimestamp(timestampMs);
 
     const fromUser = store.users[fromUsername];
     const toUser = store.users[toUsername];
@@ -265,9 +293,7 @@ app.post('/v1/invites/:id/accept', (req, res) => {
     const timestampMs = Number(req.body.timestampMs);
 
     ensureHexBytesAtLeast(bundleHex, 1, 'bundle');
-    if (!Number.isFinite(timestampMs)) {
-      throw new Error('timestampMs required');
-    }
+    validateTimestamp(timestampMs);
 
     const invite = store.invites[inviteId];
     if (!invite) {
@@ -309,9 +335,7 @@ app.post('/v1/invites/:id/decline', (req, res) => {
     const signatureHex = requireString(req.body.signatureHex, 'signatureHex');
     const timestampMs = Number(req.body.timestampMs);
 
-    if (!Number.isFinite(timestampMs)) {
-      throw new Error('timestampMs required');
-    }
+    validateTimestamp(timestampMs);
 
     const invite = store.invites[inviteId];
     if (!invite) {
@@ -342,6 +366,16 @@ app.post('/v1/invites/:id/decline', (req, res) => {
   } catch (err) {
     errorResponse(res, 400, err.message || 'invalid request');
   }
+});
+
+app.use((err, _req, res, _next) => {
+  if (err && err.message === 'origin not allowed') {
+    return errorResponse(res, 403, 'origin not allowed');
+  }
+  if (err && err.type === 'entity.parse.failed') {
+    return errorResponse(res, 400, 'invalid json');
+  }
+  return errorResponse(res, 500, 'internal error');
 });
 
 app.listen(PORT, () => {

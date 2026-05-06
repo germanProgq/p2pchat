@@ -73,6 +73,10 @@ android/*.iml
 /app/mobile/android/local.properties
 /app/mobile/android/**/build/
 /app/mobile/android/*.iml
+/app/bridge/android/.gradle/
+/app/bridge/android/.cxx/
+/app/bridge/android/build/
+/app/bridge/android/*.iml
 
 ios/Pods/
 ios/build/
@@ -90,7 +94,6 @@ ios/*.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
 
 /tools/directory/data.json
 /tools/directory/data.json.tmp
-*.lock
 
 *.swp
 *.swo
